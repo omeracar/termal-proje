@@ -1,0 +1,71 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Environment
+.env
+.env.local
+
+# Data (büyük dosyalar git'e girmesin)
+data/raw/
+data/processed/
+!data/samples/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+EO
+
+cat > .gitignore << 'EOF'
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Environment
+.env
+.env.local
+
+# Data (büyük dosyalar git'e girmesin)
+data/raw/
+data/processed/
+!data/samples/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

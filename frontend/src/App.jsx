@@ -86,22 +86,35 @@ function App() {
           <h3>Analiz Sonucu</h3>
           <p><strong>Dosya:</strong> {result.original_filename}</p>
           <p><strong>Görüntü boyutu:</strong> {result.image_shape?.join(" × ")}</p>
-          <p><strong>Tespit edilen aday sayısı:</strong> {result.num_candidates}</p>
+          <p className="person-count">
+            <strong>Tespit edilen kişi sayısı:</strong> {result.person_count}
+          </p>
+          {result.method === "threshold-legacy" && (
+            <p className="warning">
+              Yapay zekâ modeli yüklenemedi, düşük doğruluklu yedek yöntem kullanıldı.
+            </p>
+          )}
 
-          {result.candidates && result.candidates.length > 0 ? (
+          {result.annotated_image && (
+            <div className="annotated">
+              <img src={result.annotated_image} alt="Kişilerin işaretlendiği sonuç görüntüsü" />
+            </div>
+          )}
+
+          {result.people && result.people.length > 0 ? (
             <div className="candidates">
-              <h4>Tespit Edilen Bölgeler:</h4>
+              <h4>Tespit Edilen Kişiler:</h4>
               <ul>
-                {result.candidates.map((c, i) => (
+                {result.people.map((p, i) => (
                   <li key={i}>
-                    Aday {i + 1}: x={c.x}, y={c.y}, w={c.w}, h={c.h} 
-                    (oran: {c.aspect_ratio}, alan: {Math.round(c.area)})
+                    Kişi {i + 1}: x={p.x}, y={p.y}, w={p.w}, h={p.h}
+                    {" "}(güven: %{Math.round(p.score * 100)})
                   </li>
                 ))}
               </ul>
             </div>
           ) : (
-            <p>İnsan olabilecek bölge bulunamadı.</p>
+            <p>Görüntüde kişi bulunamadı.</p>
           )}
         </div>
       )}

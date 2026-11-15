@@ -1,0 +1,560 @@
+diff --git a/.gitignore b/.gitignore
+index 07efb81..6c7d14b 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -10,42 +10,8 @@ __pycache__/
+ .env
+ .env.local
+ 
+-# Data (büyük dosyalar git'e girmesin)
+-data/raw/
+-data/processed/
+-!data/samples/.gitkeep
+-
+-# IDE
+-.vscode/
+-.idea/
+-*.swp
+-
+-# Node
+-frontend/node_modules/
+-frontend/dist/
+-frontend/build/
+-
+-# OS
+-.DS_Store
+-Thumbs.db
+-
+-# Logs
+-*.log
+-logs/
+-EO
+-
+-cat > .gitignore << 'EOF'
+-# Python
+-venv/
+-__pycache__/
+-*.py[cod]
+-*.egg-info/
+-.pytest_cache/
+-.mypy_cache/
+-
+-# Environment
+-.env
+-.env.local
++# Model ağırlıkları (ilk çalıştırmada otomatik indirilir)
++backend/weights/
+ 
+ # Data (büyük dosyalar git'e girmesin)
+ data/raw/
+diff --git a/backend/app/api/analyze.py b/backend/app/api/analyze.py
+index b8bfa95..f19b26e 100644
+--- a/backend/app/api/analyze.py
++++ b/backend/app/api/analyze.py
+@@ -1,10 +1,10 @@
+-from fastapi import APIRouter, UploadFile, File, HTTPException
+-from fastapi.responses import Response
++import base64
++from pathlib import Path
++
+ import cv2
+ import numpy as np
+-from pathlib import Path
+-import tempfile
+-import os
++from fastapi import APIRouter, File, HTTPException, UploadFile
++from fastapi.concurrency import run_in_threadpool
+ 
+ from app.services.image_processing import ImageProcessingService
+ 
+@@ -12,42 +12,49 @@ router = APIRouter(prefix="/api/v1", tags=["Analyze"])
+ 
+ processor = ImageProcessingService()
+ 
++ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"}
++
++
++def _run_analysis(image: np.ndarray):
++    people, method = processor.detect_people(image)
++    annotated = processor.draw_detections(image, people)
++    ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 92])
++    if not ok:
++        raise RuntimeError("Sonuç görüntüsü oluşturulamadı")
++    return people, method, encoded
++
++
+ @router.post("/analyze")
+ async def analyze_image(file: UploadFile = File(...)):
+     """
+-    Yüklenen termal görüntüyü analiz eder.
+-    İnsan olabilecek bölgeleri tespit eder ve sonuçları döner.
++    Yüklenen termal görüntüdeki kişileri tespit eder, sayar ve
++    kutularla işaretlenmiş sonuç görüntüsünü (base64) döner.
+     """
+-    # Dosya uzantısı kontrolü
+-    allowed = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"}
+-    ext = Path(file.filename).suffix.lower()
+-    if ext not in allowed:
++    ext = Path(file.filename or "").suffix.lower()
++    if ext not in ALLOWED_EXTENSIONS:
+         raise HTTPException(status_code=400, detail="Sadece görüntü dosyaları destekleniyor")
+ 
+-    # Dosyayı oku
+     contents = await file.read()
+-    nparr = np.frombuffer(contents, np.uint8)
+-    image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+-
++    image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_UNCHANGED)
+     if image is None:
+         raise HTTPException(status_code=400, detail="Görüntü okunamadı")
+ 
+-    # Tespit
+-    candidates = processor.detect_human_candidates(image)
+-
+-    # Sonuç görüntüsü oluştur
+-    result_image = processor.draw_detections(image, candidates)
++    try:
++        people, method, encoded = await run_in_threadpool(_run_analysis, image)
++    except RuntimeError as exc:
++        raise HTTPException(status_code=500, detail=str(exc))
+ 
+-    # JPEG olarak encode et
+-    success, encoded = cv2.imencode(".jpg", result_image)
+-    if not success:
+-        raise HTTPException(status_code=500, detail="Sonuç görüntüsü oluşturulamadı")
++    annotated_b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
+ 
+     return {
+         "message": "Analiz tamamlandı",
+         "original_filename": file.filename,
+         "image_shape": list(image.shape),
+-        "num_candidates": len(candidates),
+-        "candidates": candidates,
+-        # Not: Görüntüyü base64 olarak da dönebiliriz, şimdilik sadece metadata
++        "method": method,
++        "person_count": len(people),
++        "people": people,
++        "annotated_image": f"data:image/jpeg;base64,{annotated_b64}",
++        # Eski alan adları (geriye dönük uyumluluk)
++        "num_candidates": len(people),
++        "candidates": people,
+     }
+diff --git a/backend/app/services/image_processing.py b/backend/app/services/image_processing.py
+index ab94873..cf768fb 100644
+--- a/backend/app/services/image_processing.py
++++ b/backend/app/services/image_processing.py
+@@ -1,44 +1,94 @@
+ """
+-Hassas termal insan tespit servisi
+-Küçük / uzaktaki insanlar için daha toleranslı
++Termal görüntü işleme servisi.
++
++Ana yöntem: YOLOX tabanlı insan tespiti (person_detector.py).
++Model indirilemezse (ör. internet yok) eski eşikleme + kontur yöntemi yedek olarak kullanılır.
+ """
+ 
++import logging
++from typing import Any, Dict, List, Tuple
++
+ import cv2
+ import numpy as np
+-from typing import List, Dict, Any
++
++from app.services.person_detector import ModelUnavailableError, PersonDetector, to_bgr8
++
++logger = logging.getLogger(__name__)
+ 
+ 
+ class ImageProcessingService:
+     def __init__(self):
+-        pass
++        self.detector = PersonDetector()
++
++    # ------------------------------------------------------------------
++    # Ana tespit
++    # ------------------------------------------------------------------
++    def detect_people(
++        self, image: np.ndarray, conf_threshold: float = 0.30
++    ) -> Tuple[List[Dict[str, Any]], str]:
++        """(kişi listesi, kullanılan yöntem) döner."""
++        try:
++            return self.detector.detect(image, conf_threshold=conf_threshold), "yolox"
++        except ModelUnavailableError as exc:
++            logger.warning("YOLOX kullanılamadı, eski yönteme geçildi: %s", exc)
++            return self.detect_human_candidates(image), "threshold-legacy"
++
++    # ------------------------------------------------------------------
++    # Çizim
++    # ------------------------------------------------------------------
++    def draw_detections(self, image: np.ndarray, people: List[Dict[str, Any]]) -> np.ndarray:
++        """Her kişiyi numaralı kutuyla işaretler ve sol üste toplam sayıyı yazar."""
++        result = to_bgr8(image).copy()
++        h, w = result.shape[:2]
++
++        scale = max(0.5, min(h, w) / 800)
++        thickness = max(2, int(round(scale * 2)))
++        font = cv2.FONT_HERSHEY_SIMPLEX
++        color = (0, 220, 0)  # BGR yeşil
++
++        for i, p in enumerate(people, start=1):
++            x, y, bw, bh = p["x"], p["y"], p["w"], p["h"]
++            cv2.rectangle(result, (x, y), (x + bw, y + bh), color, thickness)
++
++            label = f"Kisi {i}"
++            if "score" in p:
++                label += f" %{int(round(p['score'] * 100))}"
++            (tw, th), base = cv2.getTextSize(label, font, 0.5 * scale, 1)
++            ty = y - 4 if y - th - base - 4 >= 0 else y + bh + th + 4
++            cv2.rectangle(result, (x, ty - th - base), (x + tw + 4, ty + base), color, -1)
++            cv2.putText(result, label, (x + 2, ty), font, 0.5 * scale, (0, 0, 0), 1, cv2.LINE_AA)
++
++        banner = f"Kisi sayisi: {len(people)}"
++        (tw, th), base = cv2.getTextSize(banner, font, 0.8 * scale, 2)
++        cv2.rectangle(result, (0, 0), (tw + 16, th + base + 14), (0, 0, 0), -1)
++        cv2.putText(result, banner, (8, th + 7), font, 0.8 * scale, color, 2, cv2.LINE_AA)
++        return result
+ 
++    # ------------------------------------------------------------------
++    # Yedek yöntem (eski): eşikleme + kontur. Sıcak/soğuk kontrastı yüksek,
++    # arka planı koyu sahneler için; FLIR sokak sahnelerinde yetersizdir.
++    # ------------------------------------------------------------------
+     def preprocess(self, image: np.ndarray) -> np.ndarray:
+-        if len(image.shape) == 3:
+-            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+-            value = hsv[:, :, 2].astype(np.float32)
+-            red = image[:, :, 2].astype(np.float32)
+-            # Sıcak bölgeleri daha fazla vurgula
+-            combined = 0.4 * value + 0.6 * red
+-            gray = np.clip(combined, 0, 255).astype(np.uint8)
+-        else:
+-            gray = image.copy()
++        image = to_bgr8(image)
++        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
++        value = hsv[:, :, 2].astype(np.float32)
++        red = image[:, :, 2].astype(np.float32)
++        combined = 0.4 * value + 0.6 * red
++        gray = np.clip(combined, 0, 255).astype(np.uint8)
+ 
+         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+-        enhanced = clahe.apply(blurred)
+-        return enhanced
++        return clahe.apply(blurred)
+ 
+     def detect_human_candidates(self, image: np.ndarray) -> List[Dict[str, Any]]:
+         processed = self.preprocess(image)
+         h, w = processed.shape[:2]
+         total = h * w
+ 
+-        # Daha düşük eşik (küçük insanları kaçırmamak için)
+         otsu_val, _ = cv2.threshold(processed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+-        thresh_val = max(int(otsu_val * 0.70), 35)   # daha düşük
++        thresh_val = max(int(otsu_val * 0.70), 35)
+         _, binary = cv2.threshold(processed, thresh_val, 255, cv2.THRESH_BINARY)
+ 
+-        # Morfoloji (daha az agresif)
+         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
+         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+@@ -46,57 +96,27 @@ class ImageProcessingService:
+         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+ 
+         candidates = []
+-
+         for cnt in contours:
+             area = cv2.contourArea(cnt)
+-
+-            # Daha toleranslı alan aralığı
+             if area < total * 0.0015 or area > total * 0.40:
+                 continue
+ 
+             x, y, bw, bh = cv2.boundingRect(cnt)
+             aspect = bh / float(bw) if bw > 0 else 0
+-
+-            # İnsan şekli
+             if aspect < 1.1 or aspect > 5.5:
+                 continue
+-
+-            # Minimum yükseklik (daha düşük)
+             if bh < h * 0.06:
+                 continue
+ 
+-            # Doluluk
+             extent = area / (bw * bh) if (bw * bh) > 0 else 0
+             if extent < 0.18:
+                 continue
+ 
+-            # Skor
+             score = (area / total) * 0.45 + min(aspect / 2.8, 1.0) * 0.35 + extent * 0.20
+-
+             candidates.append({
+-                "x": int(x),
+-                "y": int(y),
+-                "w": int(bw),
+-                "h": int(bh),
+-                "area": float(area),
+-                "aspect_ratio": round(aspect, 2),
+-                "extent": round(extent, 2),
+-                "score": round(score, 3)
++                "x": int(x), "y": int(y), "w": int(bw), "h": int(bh),
++                "score": round(score, 3),
+             })
+ 
+-        # Skora göre sırala
+-        candidates = sorted(candidates, key=lambda c: c["score"], reverse=True)
++        candidates.sort(key=lambda c: c["score"], reverse=True)
+         return candidates[:6]
+-
+-    def draw_detections(self, image: np.ndarray, candidates: List[Dict[str, Any]]) -> np.ndarray:
+-        if len(image.shape) == 2:
+-            result = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+-        else:
+-            result = image.copy()
+-
+-        for i, cand in enumerate(candidates):
+-            x, y, w, h = cand["x"], cand["y"], cand["w"], cand["h"]
+-            cv2.rectangle(result, (x, y), (x + w, y + h), (0, 255, 0), 2)
+-            cv2.putText(result, f"Aday {i+1}", (x, max(y-8, 15)),
+-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+-        return result
+diff --git a/backend/app/services/person_detector.py b/backend/app/services/person_detector.py
+new file mode 100644
+index 0000000..069b455
+--- /dev/null
++++ b/backend/app/services/person_detector.py
+@@ -0,0 +1,161 @@
++"""
++Termal görüntülerde insan tespiti (YOLOX, COCO "person" sınıfı).
++
++- OpenCV'nin DNN modülüyle çalışır: PyTorch / ek bağımlılık gerekmez.
++- İlk kullanımda model (~36 MB) otomatik indirilir: backend/weights/yolox_s.onnx
++- FLIR ADAS gibi veri setlerindeki 8-bit JPEG ve 16-bit TIFF görüntüleri desteklenir.
++"""
++
++import threading
++import urllib.request
++from pathlib import Path
++from typing import Any, Dict, List
++
++import cv2
++import numpy as np
++
++MODEL_URL = (
++    "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/"
++    "models/object_detection_yolox/object_detection_yolox_2022nov.onnx"
++)
++MODEL_PATH = Path(__file__).resolve().parents[2] / "weights" / "yolox_s.onnx"
++MODEL_MIN_BYTES = 30 * 1024 * 1024  # bozuk / eksik indirmeyi yakalamak için
++
++INPUT_SIZE = 640
++PERSON_CLASS_ID = 0  # COCO
++
++
++class ModelUnavailableError(RuntimeError):
++    """Model dosyası indirilemedi veya yüklenemedi."""
++
++
++def to_bgr8(image: np.ndarray) -> np.ndarray:
++    """Her tür termal görüntüyü (gri, 16-bit, BGRA...) 8-bit 3 kanallı BGR'ye çevirir."""
++    if image.ndim == 3 and image.shape[2] == 4:
++        image = image[:, :, :3]
++
++    if image.dtype != np.uint8:
++        data = image.astype(np.float32)
++        lo, hi = np.percentile(data, (1, 99))
++        if hi <= lo:
++            hi = lo + 1.0
++        data = np.clip((data - lo) / (hi - lo), 0.0, 1.0) * 255.0
++        image = data.astype(np.uint8)
++
++    if image.ndim == 2:
++        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
++    return image
++
++
++def _ensure_model(path: Path = MODEL_PATH) -> Path:
++    if path.exists() and path.stat().st_size >= MODEL_MIN_BYTES:
++        return path
++
++    path.parent.mkdir(parents=True, exist_ok=True)
++    tmp = path.with_suffix(".tmp")
++    try:
++        urllib.request.urlretrieve(MODEL_URL, tmp)
++        if tmp.stat().st_size < MODEL_MIN_BYTES:
++            raise ModelUnavailableError("İndirilen model dosyası eksik veya bozuk")
++        tmp.replace(path)
++    except ModelUnavailableError:
++        tmp.unlink(missing_ok=True)
++        raise
++    except Exception as exc:  # ağ hatası vb.
++        tmp.unlink(missing_ok=True)
++        raise ModelUnavailableError(
++            f"Model indirilemedi ({exc}). Elle indirip şuraya koyun: {path}\n{MODEL_URL}"
++        ) from exc
++    return path
++
++
++class PersonDetector:
++    def __init__(self, model_path: Path = MODEL_PATH):
++        self._model_path = model_path
++        self._net = None
++        self._lock = threading.Lock()
++        self._grids, self._strides = self._build_grids()
++
++    @staticmethod
++    def _build_grids():
++        grids, strides = [], []
++        for stride in (8, 16, 32):
++            n = INPUT_SIZE // stride
++            xv, yv = np.meshgrid(np.arange(n), np.arange(n))
++            grid = np.stack((xv, yv), 2).reshape(-1, 2)
++            grids.append(grid)
++            strides.append(np.full((grid.shape[0], 1), stride))
++        return np.concatenate(grids).astype(np.float32), np.concatenate(strides).astype(np.float32)
++
++    def _load(self):
++        if self._net is None:
++            path = _ensure_model(self._model_path)
++            try:
++                self._net = cv2.dnn.readNetFromONNX(str(path))
++            except cv2.error as exc:
++                raise ModelUnavailableError(f"Model yüklenemedi: {exc}") from exc
++        return self._net
++
++    def detect(
++        self,
++        image: np.ndarray,
++        conf_threshold: float = 0.30,
++        nms_threshold: float = 0.45,
++    ) -> List[Dict[str, Any]]:
++        """
++        Görüntüdeki kişileri döndürür:
++        [{"x", "y", "w", "h", "score"}, ...]  (skora göre azalan sırada)
++        """
++        img = to_bgr8(image)
++        h, w = img.shape[:2]
++
++        # Letterbox: oranı koruyarak 640x640'a sığdır
++        ratio = min(INPUT_SIZE / h, INPUT_SIZE / w)
++        nh, nw = int(round(h * ratio)), int(round(w * ratio))
++        canvas = np.full((INPUT_SIZE, INPUT_SIZE, 3), 114, np.uint8)
++        canvas[:nh, :nw] = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LINEAR)
++
++        blob = cv2.dnn.blobFromImage(canvas, 1.0, (INPUT_SIZE, INPUT_SIZE), swapRB=False)
++
++        with self._lock:  # cv2.dnn ağı thread-safe değil
++            net = self._load()
++            net.setInput(blob)
++            out = net.forward()
++
++        out = np.squeeze(out, 0).astype(np.float32)  # (8400, 85)
++        out[:, :2] = (out[:, :2] + self._grids) * self._strides
++        out[:, 2:4] = np.exp(out[:, 2:4]) * self._strides
++
++        scores = out[:, 4] * out[:, 5 + PERSON_CLASS_ID]
++        keep = scores >= conf_threshold
++        if not np.any(keep):
++            return []
++
++        cxcywh, scores = out[keep, :4], scores[keep]
++        boxes = []
++        for cx, cy, bw, bh in cxcywh:
++            boxes.append([
++                float((cx - bw / 2) / ratio),
++                float((cy - bh / 2) / ratio),
++                float(bw / ratio),
++                float(bh / ratio),
++            ])
++
++        idx = cv2.dnn.NMSBoxes(boxes, scores.tolist(), conf_threshold, nms_threshold)
++        people = []
++        for i in np.array(idx).reshape(-1):
++            x, y, bw, bh = boxes[i]
++            x1, y1 = max(0, int(round(x))), max(0, int(round(y)))
++            x2, y2 = min(w, int(round(x + bw))), min(h, int(round(y + bh)))
++            if x2 <= x1 or y2 <= y1:
++                continue
++            people.append({
++                "x": x1,
++                "y": y1,
++                "w": x2 - x1,
++                "h": y2 - y1,
++                "score": round(float(scores[i]), 3),
++            })
++
++        people.sort(key=lambda p: p["score"], reverse=True)
++        return people
+diff --git a/frontend/src/App.css b/frontend/src/App.css
+index cc54d65..cfd6e07 100644
+--- a/frontend/src/App.css
++++ b/frontend/src/App.css
+@@ -121,3 +121,22 @@ input[type="file"] {
+ .info a {
+   color: #38bdf8;
+ }
++
++.person-count {
++  font-size: 1.2rem;
++}
++
++.annotated {
++  margin: 16px 0;
++}
++
++.annotated img {
++  width: 100%;
++  max-width: 100%;
++  border-radius: 8px;
++  border: 1px solid #334155;
++}
++
++.warning {
++  color: #fbbf24;
++}
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+index 1fdd15a..089d659 100644
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -86,22 +86,35 @@ function App() {
+           <h3>Analiz Sonucu</h3>
+           <p><strong>Dosya:</strong> {result.original_filename}</p>
+           <p><strong>Görüntü boyutu:</strong> {result.image_shape?.join(" × ")}</p>
+-          <p><strong>Tespit edilen aday sayısı:</strong> {result.num_candidates}</p>
++          <p className="person-count">
++            <strong>Tespit edilen kişi sayısı:</strong> {result.person_count}
++          </p>
++          {result.method === "threshold-legacy" && (
++            <p className="warning">
++              Yapay zekâ modeli yüklenemedi, düşük doğruluklu yedek yöntem kullanıldı.
++            </p>
++          )}
++
++          {result.annotated_image && (
++            <div className="annotated">
++              <img src={result.annotated_image} alt="Kişilerin işaretlendiği sonuç görüntüsü" />
++            </div>
++          )}
+ 
+-          {result.candidates && result.candidates.length > 0 ? (
++          {result.people && result.people.length > 0 ? (
+             <div className="candidates">
+-              <h4>Tespit Edilen Bölgeler:</h4>
++              <h4>Tespit Edilen Kişiler:</h4>
+               <ul>
+-                {result.candidates.map((c, i) => (
++                {result.people.map((p, i) => (
+                   <li key={i}>
+-                    Aday {i + 1}: x={c.x}, y={c.y}, w={c.w}, h={c.h} 
+-                    (oran: {c.aspect_ratio}, alan: {Math.round(c.area)})
++                    Kişi {i + 1}: x={p.x}, y={p.y}, w={p.w}, h={p.h}
++                    {" "}(güven: %{Math.round(p.score * 100)})
+                   </li>
+                 ))}
+               </ul>
+             </div>
+           ) : (
+-            <p>İnsan olabilecek bölge bulunamadı.</p>
++            <p>Görüntüde kişi bulunamadı.</p>
+           )}
+         </div>
+       )}

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: thermal-camera-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: thermal_camera
+      POSTGRES_USER: thermal_user
+      POSTGRES_PASSWORD: thermal_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - thermal_camera_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thermal_user -d thermal_camera"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  thermal_camera_postgres_data:

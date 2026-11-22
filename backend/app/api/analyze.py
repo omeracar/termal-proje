@@ -5,9 +5,12 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session
 
+from app.database import get_db
+from app.models import AnalysisRecord
 from app.services.image_processing import ImageProcessingService
 from app.services.temperature_analysis import TemperatureAnalysisService
 from app.services.video_analysis import ThermalVideoAnalysisService
@@ -32,8 +35,16 @@ def _run_analysis(image: np.ndarray):
     return candidates, method, measurements, encoded
 
 
+def _save_record(db: Session, **values) -> AnalysisRecord:
+    record = AnalysisRecord(**values)
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
 @router.post("/analyze")
-async def analyze_image(file: UploadFile = File(...)):
+async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_db)):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Use JPG, PNG, TIFF or BMP for image analysis")
@@ -47,23 +58,46 @@ async def analyze_image(file: UploadFile = File(...)):
         candidates, method, measurements, encoded = await run_in_threadpool(_run_analysis, image)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    annotated_b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
-    return {
-        "message": "Analysis completed", "original_filename": file.filename,
+
+    vital = {"status": "insufficient_data",
+             "message": "A single image cannot support temporal respiratory-signal analysis."}
+    result_data = {
         "image_shape": list(image.shape), "method": method,
         "detection_semantics": "thermal_candidate_regions_not_confirmed_people",
-        "person_count": None, "candidate_count": len(candidates),
         "candidates": candidates, "temperature_analysis": measurements,
         "temperature_warning": "Pixel levels are DN, not °C. A calibrated radiometric temperature matrix is required for physical temperature values.",
-        "vital_signs": {"status": "insufficient_data",
-                        "message": "A single image cannot support temporal respiratory-signal analysis."},
+        "vital_signs": vital,
+    }
+    try:
+        record = _save_record(
+            db, analysis_type="image", original_filename=(file.filename or "upload")[:255],
+            candidate_count=len(candidates),
+            summary={
+                "candidate_region_count": len(candidates),
+                "image_dimensions": " × ".join(str(v) for v in image.shape),
+                "processing_method": method,
+                "temperature_unit": "DN (raw pixel intensity)",
+                "vital_signal_status": vital["status"],
+            },
+            result_data=result_data,
+        )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Analysis completed but database save failed. Check PostgreSQL configuration.") from exc
+
+    annotated_b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
+    return {
+        "analysis_id": record.id, "message": "Analysis completed and saved",
+        "original_filename": file.filename, **result_data,
+        "person_count": None, "candidate_count": len(candidates),
+        "temperature_analysis": measurements, "vital_signs": vital,
         "annotated_image": f"data:image/jpeg;base64,{annotated_b64}",
         "num_candidates": len(candidates),
     }
 
 
 @router.post("/analyze-video")
-async def analyze_video(file: UploadFile = File(...)):
+async def analyze_video(file: UploadFile = File(...), db: Session = Depends(get_db)):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in VIDEO_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Use MP4, AVI, MOV or MKV for video analysis")
@@ -76,9 +110,28 @@ async def analyze_video(file: UploadFile = File(...)):
             temp_file.write(contents)
             temp_path = temp_file.name
         result = await run_in_threadpool(video_processor.analyze, temp_path)
-        return {"message": "Video analysis completed", "original_filename": file.filename, **result}
+        duration = float(result["video"]["duration_s"])
+        record = _save_record(
+            db, analysis_type="video", original_filename=(file.filename or "upload")[:255],
+            candidate_count=int(result.get("track_count", 0)),
+            duration_seconds=int(duration),
+            summary={
+                "duration_seconds": duration,
+                "source_fps": result["video"]["source_fps"],
+                "sampled_frames": result["video"]["sampled_frames"],
+                "candidate_track_count": result["track_count"],
+                "tracking_method": result["tracking_method"],
+                "signal_unit": "DN (raw grayscale intensity)",
+            },
+            result_data=result,
+        )
+        return {"analysis_id": record.id, "message": "Video analysis completed and saved",
+                "original_filename": file.filename, **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Video analysis could not be saved. Check PostgreSQL configuration.") from exc
     finally:
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)

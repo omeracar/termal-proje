@@ -1,13 +1,22 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.upload import router as upload_router
 from app.api.analyze import router as analyze_router
+from app.api.history import router as history_router
+from app.database import init_database
 
 app = FastAPI(
     title="Termal Kamera - Kayıp Personel Tespiti",
-    description="Termal görüntü analizi, insan tespiti ve yaşam belirtisi değerlendirme sistemi",
-    version="0.1.0"
+    description="Klasik termal görüntü analizi, analiz geçmişi ve PDF raporlama prototipi",
+    version="0.2.0",
 )
+
+
+@app.on_event("startup")
+def startup_event():
+    init_database()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,14 +28,13 @@ app.add_middleware(
 
 app.include_router(upload_router)
 app.include_router(analyze_router)
+app.include_router(history_router)
+
 
 @app.get("/")
 def root():
-    return {
-        "message": "Termal Kamera Analiz API'si çalışıyor",
-        "version": "0.1.0",
-        "docs": "/docs"
-    }
+    return {"message": "Termal Kamera Analiz API'si çalışıyor", "version": "0.2.0", "docs": "/docs"}
+
 
 @app.get("/health")
 def health_check():

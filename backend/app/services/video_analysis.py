@@ -18,6 +18,8 @@ class ThermalVideoAnalysisService:
         self.vital = VitalSignsService()
 
     def analyze(self, video_path: str, max_sample_rate_hz: float = 10.0) -> Dict[str, Any]:
+        if not np.isfinite(max_sample_rate_hz) or max_sample_rate_hz <= 0:
+            raise ValueError("max_sample_rate_hz must be greater than zero")
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError("Video could not be opened. Check codec and file integrity.")
@@ -31,6 +33,12 @@ class ThermalVideoAnalysisService:
             raise ValueError("Video metadata does not contain a valid FPS/frame count.")
 
         duration = frame_count / fps
+        if duration > 600:
+            cap.release()
+            raise ValueError("Video duration exceeds the 10-minute analysis limit")
+        if width <= 0 or height <= 0 or width * height > 3840 * 2160:
+            cap.release()
+            raise ValueError("Video dimensions are invalid or exceed 4K")
         stride = max(1, int(round(fps / max_sample_rate_hz)))
         sampled_fps = fps / stride
         tracks: Dict[int, Dict[str, Any]] = {}

@@ -8,7 +8,25 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+
+def _register_unicode_font():
+    candidates = [
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"),
+        ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
+    ]
+    for regular, bold in candidates:
+        if Path(regular).is_file() and Path(bold).is_file():
+            if "ThermalUnicode" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("ThermalUnicode", regular))
+                pdfmetrics.registerFont(TTFont("ThermalUnicode-Bold", bold))
+                pdfmetrics.registerFontFamily("ThermalUnicode", normal="ThermalUnicode", bold="ThermalUnicode-Bold")
+            return "ThermalUnicode"
+    return "Helvetica"
 
 
 def _safe(value):
@@ -20,6 +38,7 @@ def _safe(value):
 
 
 def build_analysis_pdf(record) -> bytes:
+    font_name = _register_unicode_font()
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4, rightMargin=18 * mm, leftMargin=18 * mm,
@@ -28,8 +47,10 @@ def build_analysis_pdf(record) -> bytes:
         author="Thermal Camera Analysis Prototype",
     )
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="ReportTitle", parent=styles["Title"], alignment=TA_CENTER, fontSize=17, leading=21))
-    styles.add(ParagraphStyle(name="SmallNote", parent=styles["BodyText"], fontSize=8, leading=11, textColor=colors.HexColor("#555555")))
+    for style_name in ("Normal", "BodyText", "Title", "Heading2"):
+        styles[style_name].fontName = font_name
+    styles.add(ParagraphStyle(name="ReportTitle", parent=styles["Title"], alignment=TA_CENTER, fontSize=17, leading=21, fontName=font_name))
+    styles.add(ParagraphStyle(name="SmallNote", parent=styles["BodyText"], fontSize=8, leading=11, textColor=colors.HexColor("#555555"), fontName=font_name))
     story = [
         Paragraph("THERMAL CAMERA ANALYSIS REPORT", styles["ReportTitle"]),
         Spacer(1, 5 * mm),
@@ -42,7 +63,7 @@ def build_analysis_pdf(record) -> bytes:
         ["Analysis ID", str(record.id)],
         ["Analysis type", record.analysis_type.upper()],
         ["Source file", record.original_filename],
-        ["Created at (UTC)", created],
+        ["Created at", created],
         ["Status", record.status],
         ["Candidate regions / tracks", str(record.candidate_count if record.candidate_count is not None else "—")],
     ]
@@ -80,8 +101,7 @@ def build_analysis_pdf(record) -> bytes:
     details = record.result_data or {}
     for section, payload in details.items():
         story.append(Paragraph(f"<b>{_safe(section.replace('_', ' ').title())}</b>", styles["BodyText"]))
-        text = _safe(payload)
-        story.append(Paragraph(text[:5000], styles["SmallNote"]))
+        story.append(Paragraph(_safe(payload)[:5000], styles["SmallNote"]))
         story.append(Spacer(1, 2 * mm))
 
     story.extend([

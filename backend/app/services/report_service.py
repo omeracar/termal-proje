@@ -2,6 +2,7 @@
 from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
+import unicodedata
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -31,10 +32,18 @@ def _register_unicode_font():
 
 def _safe(value):
     if value is None:
-        return "—"
+        value = "-"
     if isinstance(value, (dict, list)):
         value = str(value)
-    return escape(str(value))
+    text = str(value)
+    if "ThermalUnicode" not in pdfmetrics.getRegisteredFontNames():
+        replacements = str.maketrans({
+            "ı": "i", "İ": "I", "ğ": "g", "Ğ": "G", "ş": "s", "Ş": "S",
+            "ç": "c", "Ç": "C", "ö": "o", "Ö": "O", "ü": "u", "Ü": "U",
+            "—": "-", "–": "-", "’": "'", "“": '"', "”": '"',
+        })
+        text = unicodedata.normalize("NFKD", text.translate(replacements)).encode("ascii", "ignore").decode("ascii")
+    return escape(text)
 
 
 def build_analysis_pdf(record) -> bytes:
@@ -54,7 +63,7 @@ def build_analysis_pdf(record) -> bytes:
     story = [
         Paragraph("THERMAL CAMERA ANALYSIS REPORT", styles["ReportTitle"]),
         Spacer(1, 5 * mm),
-        Paragraph("Research prototype — decision-support output, not a medical diagnosis or proof of life/death.", styles["SmallNote"]),
+        Paragraph("Research prototype - decision-support output, not a medical diagnosis or proof of life/death.", styles["SmallNote"]),
         Spacer(1, 5 * mm),
     ]
 

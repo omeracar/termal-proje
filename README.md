@@ -1,48 +1,72 @@
-# Termal Kamera ile Kayıp Personel Aday Bölgesi Tespiti
+# Thermal Camera Search-and-Rescue Decision-Support Prototype
 
-## Current implementation status
+## Implemented in this development branch
 
-This branch removes the pretrained YOLOX/COCO dependency and uses classical OpenCV operations only.
+- Classical OpenCV preprocessing: median denoising and CLAHE.
+- Otsu/percentile thresholding, morphology and contour-based candidate extraction.
+- Geometric/intensity descriptors; candidate regions are explicitly not confirmed people.
+- Pixel intensity (DN) is kept separate from calibrated radiometric temperature (°C).
+- Temperature statistics and background comparison helpers for a supplied calibrated temperature matrix.
+- Still-image endpoint: `POST /api/v1/analyze`.
+- Video endpoint: `POST /api/v1/analyze-video`.
+- Video frame sampling, greedy nearest-centroid candidate association and temporal ROI intensity extraction.
+- Welch power spectral density analysis in an exploratory respiratory-frequency band.
+- Frontend image/video upload and result presentation.
+- Unit tests for image conversion, candidate API semantics, temperature units and signal-analysis minimum-data behavior.
 
-### Implemented in this branch
-- Median denoising and CLAHE contrast enhancement.
-- Otsu + percentile-based thermal foreground thresholding.
-- Morphological closing/opening and contour extraction.
-- Geometry and region-intensity descriptors for candidate ranking.
-- Annotated candidate-region output.
-- Explicit separation of raw pixel intensity (DN) from calibrated radiometric temperature (°C).
-- Background comparison helper for a calibrated temperature matrix.
-- Exploratory Welch-PSD analysis in a respiratory-frequency band, with strict non-medical wording.
-- Image upload size limit and clearer API semantics.
+No AI, machine learning, pretrained model, neural network or model download is used.
 
-### Important limitations (not yet satisfied)
-1. Candidate regions are NOT confirmed people. Thresholding and geometry alone cannot reliably distinguish humans from hot objects, animals, reflections or terrain.
-2. A normal JPEG/PNG/TIFF pixel value is not automatically a temperature. The API currently has no camera-specific radiometric decoder/calibration input; results are therefore labelled DN.
-3. The current public analysis endpoint processes still images only. Video upload/storage is not equivalent to video analysis.
-4. Respiratory signal analysis is a service function but is not yet connected to a video ROI-tracking pipeline or API.
-5. No PostgreSQL persistence, analysis history, report export, dataset manifest, annotation workflow or benchmark evaluation pipeline is implemented yet.
-6. Precision, recall, F1, false positives/negatives, processing time and temperature error have not been measured on a labelled, real-camera dataset.
+## Video analysis pipeline
 
-## Safety and interpretation
-This is a research/decision-support prototype, not a medical device or a validated search-and-rescue life detector. A positive respiratory-band periodic component is not proof of breathing or life. Failure to detect it is not evidence of death. Never use this output as the sole basis for rescue, triage or life/death decisions.
+1. OpenCV decodes the uploaded video and reads its FPS/frame metadata.
+2. Frames are sampled at up to 10 Hz.
+3. Each sampled frame is processed with the same classical candidate detector as still images.
+4. Candidate regions are associated between frames using nearest-centroid distance.
+5. Mean grayscale intensity in each tracked ROI forms a temporal signal.
+6. Tracks with less than 70% sample coverage are withheld from signal analysis.
+7. The signal is detrended and Welch PSD is calculated. A dominant component in 0.10–0.70 Hz is reported as a periodic component compatible with that frequency band, not as proof of breathing.
+
+## Important limitations
+
+1. Candidate regions are not confirmed people. Classical thresholding/geometry cannot reliably distinguish humans from hot objects, animals, reflections or terrain.
+2. Video ROI association is a simple nearest-centroid heuristic. Camera motion, occlusion, crossing people and changing scale can break identity continuity.
+3. The current video signal is grayscale pixel intensity in DN, not calibrated temperature. Per-frame normalization/contrast processing can alter intensity; robust respiratory analysis requires stable radiometric temperature or a carefully controlled signal extraction pipeline.
+4. The respiratory-band analysis is exploratory and unvalidated. A positive component does not prove breathing or life; a negative result does not prove absence of life.
+5. No camera-specific radiometric decoder/calibration adapter is connected to the API.
+6. No PostgreSQL persistence, analysis history, report export, dataset manifest, annotation workflow or benchmark pipeline is implemented yet.
+7. Precision, recall, F1, false positives/negatives, processing time, temperature error and respiratory detection performance have not been measured on a labelled real-camera dataset.
+
+## Safety
+
+This is a research prototype, not a medical device or validated search-and-rescue life detector. Never use its output as the sole basis for rescue, triage or life/death decisions. Human review and independent rescue procedures remain essential.
 
 ## Run
-From `backend`, install `requirements.txt` and run:
+
+Backend (from `backend`):
 ```bash
+pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
-From `frontend`, run:
+
+Frontend (from `frontend`):
 ```bash
 npm install
 npm run dev
 ```
 
+Run backend unit tests (from `backend`):
+```bash
+pytest -q
+```
+
 API documentation: `http://localhost:8000/docs`
 
-## Next engineering milestones
-1. Add real radiometric camera/file support (e.g. camera-specific raw formats and documented calibration metadata).
-2. Add video decoding, timestamp/FPS validation, ROI tracking and per-frame temperature extraction.
-3. Build labelled real-thermal dataset manifests and train/test split by recording/session (not random adjacent frames).
-4. Add reproducible benchmark scripts and confusion-matrix metrics.
-5. Add PostgreSQL models/migrations, analysis history and PDF/CSV report export.
-6. Add UI controls for ROI selection, thresholds, dataset provenance and quality warnings.
+## Next milestones
+
+1. Select and document real thermal datasets; separate data suitable for detection, radiometry and respiratory validation.
+2. Add camera-specific radiometric file decoding and calibration metadata.
+3. Improve temporal tracking (motion compensation, optical flow or Kalman tracking; classical methods only).
+4. Add per-frame calibrated temperature extraction and stable anatomical/ROI selection.
+5. Build labelled-data evaluation: precision, recall, F1, false positives/negatives, processing time and signal-detection metrics.
+6. Add PostgreSQL models/migrations, analysis history and PDF/CSV reports.
+7. Add upload provenance, operator settings, ROI review and reproducible analysis parameters.

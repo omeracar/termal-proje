@@ -66,7 +66,7 @@ def test_candidate_detector_returns_classical_method():
     image = np.zeros((120, 100), dtype=np.uint8)
     image[20:100, 35:65] = 220
     candidates, method = ImageProcessingService().detect_people(image)
-    assert method == "classical-threshold-contours"
+    assert method == "classical-multilevel-contours"
     assert isinstance(candidates, list)
     for item in candidates:
         assert item["candidate_type"] == "thermal_geometric_candidate"

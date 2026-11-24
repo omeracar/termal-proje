@@ -1,0 +1,5 @@
+{
+  "_aciklama": "Kutular [x, y, genislik, yukseklik] pikseldir. Bu dosyayi ground_truth.json olarak kopyalayip KENDI elle cizdiginiz etiketlerle doldurun; asagidaki degerler yalnizca bicim ornegidir.",
+  "ornek_goruntu_1.jpg": [[120, 60, 25, 52], [165, 66, 22, 50]],
+  "insan_olmayan_goruntu.jpg": []
+}

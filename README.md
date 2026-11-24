@@ -2,7 +2,7 @@
 
 ## Implemented in this development branch
 
-- Classical OpenCV preprocessing and contour-based thermal candidate extraction.
+- Classical OpenCV candidate extraction: denoising, local-contrast map, multi-level adaptive thresholding, morphology, contour/geometry filters, splitting of side-by-side blobs, merging of stacked fragments and rejection of UI graphics (colour bars, text).
 - Candidate regions are explicitly not labelled as confirmed people.
 - Raw pixel intensity (DN) is separated from calibrated radiometric temperature (°C).
 - Still-image and video analysis endpoints.
@@ -61,6 +61,18 @@ npm run dev
 
 The frontend displays the analysis ID, refreshable analysis history, stored record details and PDF download links.
 
+## Detector evaluation
+
+`backend/scripts/evaluate_detector.py` computes precision, recall, F1 (IoU matching) and time per image from your own labelled real images:
+
+```bash
+cd backend
+cp ../data/samples/ground_truth.example.json ../data/samples/ground_truth.json   # then fill with hand-drawn boxes
+python scripts/evaluate_detector.py --images ../data/samples --truth ../data/samples/ground_truth.json
+```
+
+Informal check, 11 real thermal images (people counted by eye, NOT labelled ground truth, so these are not precision/recall values): the detector matched the counted number exactly on 3 images, was within one on 3 more, and was off by three or more on the remaining 5 (animals, close-up subjects, distant or dense crowds, a cluttered street scene with 12 candidates for 7 people). Mean time was about 0.12 s per image on a CPU.
+
 ## Important technical limitations
 
 1. Candidate regions are not confirmed people. Thresholding and geometry cannot reliably distinguish humans from hot objects, animals, reflections or terrain.
@@ -68,7 +80,7 @@ The frontend displays the analysis ID, refreshable analysis history, stored reco
 3. The current temporal signal is grayscale pixel intensity in DN, not calibrated temperature.
 4. Respiratory-band periodicity is exploratory and unvalidated. A positive component is not proof of breathing or life; a negative result is not proof of death.
 5. No camera-specific radiometric decoder/calibration adapter is connected to the API.
-6. No labelled real-camera benchmark has been executed; precision, recall, F1, false-positive/negative rates, temperature error and respiratory detection performance are unknown.
+6. No labelled real-camera benchmark has been executed; precision, recall, F1, temperature error and respiratory detection performance are unknown. Only an informal visual check exists (see "Detector evaluation"). Animals are not separated from people, close-up subjects may be split into fragments and dense crowds of small subjects are under-counted.
 7. PostgreSQL stores analysis metadata and result JSON. Uploaded source media files themselves are not archived in the database or object storage.
 
 ## Safety

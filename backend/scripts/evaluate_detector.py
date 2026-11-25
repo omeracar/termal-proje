@@ -10,7 +10,8 @@ ground_truth.json biçimi (kutular [x, y, genişlik, yükseklik], piksel cinsind
       "4.jpeg": []
     }
 "_" ile başlayan anahtarlar yok sayılır. Etiketler gerçek görüntüler üzerinde elle çizilmelidir
-(ör. FLIR ADAS COCO etiketleri veya LabelImg/CVAT çıktısı); bu betik etiket üretmez.
+(tools/label_boxes.html aracı, LabelImg/CVAT veya FLIR ADAS COCO etiketleri); bu betik etiket üretmez.
+--vis KLASÖR verilirse her görüntü için yeşil=doğru, kırmızı=yanlış, sarı=kaçırılan kutulu resim yazılır.
 """
 import argparse
 import json
@@ -35,11 +36,14 @@ def iou(a, b):
     return inter / float(aw * ah + bw * bh - inter)
 
 
-def match(pred, truth, thr):
-    """Skora göre azalan sırayla açgözlü eşleştirme. (TP, FP, FN) döner."""
+def match_details(pred, truth, thr):
+    """Skora göre azalan sırayla açgözlü, bire bir eşleştirme.
+    (tp_pred_indeksleri, eşleşmeyen_gerçek_indeksleri) döner."""
     used = set()
-    tp = 0
-    for p in sorted(pred, key=lambda c: c["score"], reverse=True):
+    tp_idx = []
+    order = sorted(range(len(pred)), key=lambda i: pred[i]["score"], reverse=True)
+    for pi in order:
+        p = pred[pi]
         box = (p["x"], p["y"], p["w"], p["h"])
         best, best_i = 0.0, -1
         for i, t in enumerate(truth):
@@ -50,8 +54,34 @@ def match(pred, truth, thr):
                 best, best_i = v, i
         if best >= thr:
             used.add(best_i)
-            tp += 1
-    return tp, len(pred) - tp, len(truth) - tp
+            tp_idx.append(pi)
+    fn_idx = [i for i in range(len(truth)) if i not in used]
+    return tp_idx, fn_idx
+
+
+def match(pred, truth, thr):
+    """(TP, FP, FN) döner."""
+    tp_idx, fn_idx = match_details(pred, truth, thr)
+    return len(tp_idx), len(pred) - len(tp_idx), len(fn_idx)
+
+
+def draw_vis(image, pred, truth, thr):
+    """TP yeşil, FP kırmızı, kaçırılan gerçek (FN) sarı kutu çizer."""
+    if image.ndim == 2:
+        vis = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    else:
+        vis = image[:, :, :3].copy()
+    if vis.dtype != "uint8":
+        vis = cv2.normalize(vis, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
+    tp_idx, fn_idx = match_details(pred, truth, thr)
+    tp_set = set(tp_idx)
+    for i, p in enumerate(pred):
+        color = (0, 200, 0) if i in tp_set else (0, 0, 255)
+        cv2.rectangle(vis, (p["x"], p["y"]), (p["x"] + p["w"], p["y"] + p["h"]), color, 2)
+    for i in fn_idx:
+        x, y, w, h = truth[i]
+        cv2.rectangle(vis, (int(x), int(y)), (int(x + w), int(y + h)), (0, 215, 255), 2)
+    return vis
 
 
 def main():
@@ -60,10 +90,13 @@ def main():
     ap.add_argument("--truth", required=True, help="Etiket JSON dosyası")
     ap.add_argument("--iou", type=float, default=0.5, help="Eşleşme için en düşük IoU (varsayılan 0.5)")
     ap.add_argument("--out", help="Sonuçları JSON olarak kaydet")
+    ap.add_argument("--vis", help="Bu klasöre görüntü başına kutulu sonuç resmi yaz (yeşil=doğru, kırmızı=yanlış, sarı=kaçırılan)")
     args = ap.parse_args()
 
     truth = {k: v for k, v in json.load(open(args.truth, encoding="utf-8")).items() if not k.startswith("_")}
     svc = ImageProcessingService()
+    if args.vis:
+        Path(args.vis).mkdir(parents=True, exist_ok=True)
 
     tot_tp = tot_fp = tot_fn = 0
     times, rows = [], []
@@ -80,6 +113,9 @@ def main():
         tp, fp, fn = match(pred, boxes, args.iou)
         tot_tp, tot_fp, tot_fn = tot_tp + tp, tot_fp + fp, tot_fn + fn
         times.append(dt)
+        if args.vis:
+            cv2.imwrite(str(Path(args.vis) / f"{Path(name).stem}_sonuc.png"),
+                        draw_vis(image, pred, boxes, args.iou))
         rows.append({"image": name, "truth": len(boxes), "predicted": len(pred),
                      "tp": tp, "fp": fp, "fn": fn, "seconds": round(dt, 3)})
         print(f"{name:20s}{len(boxes):8d}{len(pred):9d}{tp:5d}{fp:5d}{fn:5d}{dt:9.2f}")

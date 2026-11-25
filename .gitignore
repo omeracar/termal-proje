@@ -15,6 +15,8 @@ __pycache__/
 # Data (büyük dosyalar git'e girmesin)
 data/raw/
 data/processed/
+data/eval_vis/
+data/eval_result.json
 !data/samples/.gitkeep
 
 # IDE

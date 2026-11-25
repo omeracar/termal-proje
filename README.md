@@ -63,13 +63,20 @@ The frontend displays the analysis ID, refreshable analysis history, stored reco
 
 ## Detector evaluation
 
-`backend/scripts/evaluate_detector.py` computes precision, recall, F1 (IoU matching) and time per image from your own labelled real images:
+Real precision/recall/F1 needs hand-labelled ground truth. Label your images with the bundled mouse-driven tool:
+
+1. Open `tools/label_boxes.html` in a browser (double-click; no server, no internet needed).
+2. Click **Klasör seç** and choose `data/samples` (or **Görüntü seç** for single files).
+3. Drag a box tightly around every visible person. `E` marks an image as "no people", `Z` undoes, `Delete` removes the selected box, arrow keys switch images. Progress is autosaved in the browser.
+4. Click **Dışa aktar** and save the downloaded `ground_truth.json` into `data/samples/`. Only reviewed images are exported.
+5. Run the evaluation (add `--vis` to get result images: green = correct, red = false detection, yellow = missed person):
 
 ```bash
 cd backend
-cp ../data/samples/ground_truth.example.json ../data/samples/ground_truth.json   # then fill with hand-drawn boxes
-python scripts/evaluate_detector.py --images ../data/samples --truth ../data/samples/ground_truth.json
+python scripts/evaluate_detector.py --images ../data/samples --truth ../data/samples/ground_truth.json --vis ../data/eval_vis --out ../data/eval_result.json
 ```
+
+Boxes are `[x, y, width, height]` in image pixels; a detection counts as correct when IoU >= 0.5 (one-to-one greedy matching). Ground-truth JSON may be loaded back into the tool with **Etiket yükle (JSON)** to continue labelling.
 
 Informal check, 11 real thermal images (people counted by eye, NOT labelled ground truth, so these are not precision/recall values): the detector matched the counted number exactly on 3 images, was within one on 3 more, and was off by three or more on the remaining 5 (animals, close-up subjects, distant or dense crowds, a cluttered street scene with 12 candidates for 7 people). Mean time was about 0.12 s per image on a CPU.
 

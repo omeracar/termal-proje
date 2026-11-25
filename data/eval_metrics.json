@@ -1,0 +1,17 @@
+{
+  "_aciklama": "Elle etiketlenmiş 10 gerçek termal görüntü üzerinde ölçüm (backend/scripts/evaluate_detector.py, IoU >= 0.5). Etiketler tools/label_boxes.html ile çizildi. Tek kaynak, küçük örneklem: genelleştirilemez.",
+  "summary": {"images": 10, "iou_threshold": 0.5, "tp": 14, "fp": 31, "fn": 41,
+              "precision": 0.311, "recall": 0.255, "f1": 0.28, "mean_seconds_per_image": 0.107},
+  "per_image": [
+    {"image": "1.jpg", "truth": 5, "predicted": 5, "tp": 4, "fp": 1, "fn": 1, "seconds": 0.06},
+    {"image": "10.jpeg", "truth": 25, "predicted": 8, "tp": 1, "fp": 7, "fn": 24, "seconds": 0.14},
+    {"image": "2.jpeg", "truth": 6, "predicted": 2, "tp": 0, "fp": 2, "fn": 6, "seconds": 0.08},
+    {"image": "3.jpeg", "truth": 1, "predicted": 2, "tp": 0, "fp": 2, "fn": 1, "seconds": 0.11},
+    {"image": "4.jpeg", "truth": 4, "predicted": 9, "tp": 0, "fp": 9, "fn": 4, "seconds": 0.09},
+    {"image": "5.jpeg", "truth": 2, "predicted": 7, "tp": 1, "fp": 6, "fn": 1, "seconds": 0.12},
+    {"image": "6.jpg", "truth": 4, "predicted": 4, "tp": 3, "fp": 1, "fn": 1, "seconds": 0.12},
+    {"image": "7.jpeg", "truth": 4, "predicted": 3, "tp": 2, "fp": 1, "fn": 2, "seconds": 0.12},
+    {"image": "8.jpeg", "truth": 1, "predicted": 1, "tp": 1, "fp": 0, "fn": 0, "seconds": 0.13},
+    {"image": "9.jpeg", "truth": 3, "predicted": 4, "tp": 2, "fp": 2, "fn": 1, "seconds": 0.10}
+  ]
+}

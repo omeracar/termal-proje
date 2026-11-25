@@ -10,6 +10,10 @@ Termal görüntülerde **insan olabilecek bölgeleri** klasik görüntü işleme
 - Aday bölgeler açıkça "doğrulanmış kişi" olarak etiketlenmez.
 - Ham piksel yoğunluğu (DN) ile kalibre edilmiş radyometrik sıcaklık (°C) birbirinden ayrı tutulur.
 - Görüntü ve video analizi uç noktaları.
+- Her aday için bölge istatistiği (ortalama, min, max, std), **çevre karşılaştırması** (aday ile çevresindeki halka) ve **değer dağılımı histogramı**. Kalibre edilmiş °C haritası yoksa tüm değerler "DN (görece)" etiketiyle gösterilir ve fiziksel sıcaklık olarak yorumlanmamalıdır.
+- **Isı haritası** (renk skalalı, görece yoğunluk) ve videoda iz kutularıyla **işaretli önizleme kareleri** (ilk, orta, son).
+- Yaşam belirtisi sonucu şartnamedeki üç ifadeden biriyle verilir: "Yaşam belirtisiyle uyumlu bulgu tespit edildi.", "Yaşam belirtisi belirlenemedi.", "Analiz için yeterli veri bulunmuyor." (`vital_signs.finding`).
+- PDF rapor, varsa `data/eval_metrics.json` içindeki dedektör doğrulama ölçümlerini de içerir.
 - Sezgisel video ilgi bölgesi (ROI) takibi ve keşif amaçlı Welch PSD sinyal analizi.
 - Görüntü ve video sonuçlarının PostgreSQL'e kaydı.
 - Analiz geçmişi ve ayrıntı uç noktaları.
@@ -76,21 +80,55 @@ Gerçek Precision/Recall/F1 değerleri için elle etiketlenmiş gerçek veri ger
 
 ```bash
 cd backend
-python scripts/evaluate_detector.py --images ../data/samples --truth ../data/samples/ground_truth.json --vis ../data/eval_vis --out ../data/eval_result.json
+python scripts/evaluate_detector.py --images ../data/samples --truth ../data/samples/ground_truth.json --vis ../data/eval_vis --out ../data/eval_metrics.json
 ```
 
 Kutular görüntü pikseli cinsinden `[x, y, genişlik, yükseklik]` biçimindedir; IoU ≥ 0,5 olan tespit doğru sayılır (bire bir açgözlü eşleştirme). Etiket dosyası **Etiket yükle (JSON)** ile araca geri yüklenip etiketlemeye devam edilebilir.
 
-Gayriresmî kontrol, 11 gerçek termal görüntü (kişiler gözle sayıldı, etiketli doğru veri DEĞİL; dolayısıyla Precision/Recall değeri değildir): dedektör 3 görüntüde sayıyı tam bildi, 3 görüntüde bir kişi farkla bildi, kalan 5 görüntüde üç veya daha fazla fark verdi (hayvanlar, yakın plan özneler, uzak ya da yoğun kalabalıklar, 7 kişi için 12 aday çıkan kalabalık bir sokak sahnesi). Ortalama süre işlemcide görüntü başına yaklaşık 0,12 saniyedir.
+### Ölçülen başarım (10 elle etiketli görüntü, IoU ≥ 0,5)
+
+| Ölçüt | Değer |
+|---|---|
+| Etiketli görüntü / kişi | 10 görüntü, 55 kişi |
+| Doğru tespit (TP) | 14 |
+| Yanlış tespit (FP) | 31 |
+| Tespit edilemeyen kişi (FN) | 41 |
+| **Precision** | **0,311** |
+| **Recall** | **0,255** |
+| **F1** | **0,280** |
+| Görüntü başına süre | 0,107 s |
+
+Ayrıntılı görüntü bazlı sonuçlar `data/eval_metrics.json` dosyasındadır. 10.jpeg tek başına 25 kişilik uzak, yoğun bir kalabalıktır; o görüntü çıkarılınca Precision ≈ 0,35, Recall ≈ 0,43, F1 ≈ 0,39 olur. Örneklem küçük ve tek kaynaklıdır; bu değerler genelleştirilemez. Dedektörün eşikleri bu etiketlere göre **ayarlanmamıştır**. Sıcaklık ölçüm hatası ve solunum tespit başarısı için referans veri bulunmadığından ölçülememiştir.
+
+Önceki gayriresmî kontrol (etiketsiz), 11 gerçek termal görüntü (kişiler gözle sayıldı, etiketli doğru veri DEĞİL; dolayısıyla Precision/Recall değeri değildir): dedektör 3 görüntüde sayıyı tam bildi, 3 görüntüde bir kişi farkla bildi, kalan 5 görüntüde üç veya daha fazla fark verdi (hayvanlar, yakın plan özneler, uzak ya da yoğun kalabalıklar, 7 kişi için 12 aday çıkan kalabalık bir sokak sahnesi). Ortalama süre işlemcide görüntü başına yaklaşık 0,12 saniyedir.
+
+## Veri seti belgelendirmesi
+
+Şartname, veri setlerinin kaynaklarının, erişim bağlantılarının ve teknik özelliklerinin belgelenmesini zorunlu tutar. **Bu belge henüz tamamlanmamıştır.**
+
+`data/samples` içindeki 10 görüntü gerçek termal kamera görüntüleridir, ancak kaynakları, lisansları ve çekim bilgileri henüz kayıt altına alınmamıştır. Aşağıdaki tablo doldurulmalıdır:
+
+| Dosya | Veri seti / kaynak | Erişim bağlantısı | Lisans | Radyometrik mi? | Video var mı? |
+|---|---|---|---|---|---|
+| 1.jpg … 10.jpeg | _belirtilecek_ | _belirtilecek_ | _belirtilecek_ | _belirtilecek_ | _belirtilecek_ |
+
+Şartnamede önerilen kaynaklar (FLIR Thermal Dataset, KAIST Multispectral Pedestrian Dataset, LLVIP, Zenodo, IEEE DataPort, akademik veri setleri) kullanılmadan önce şu açılardan incelenmelidir: radyometrik sıcaklık içeriyor mu, termal video içeriyor mu, solunum doğrulaması için etiket var mı. Bunlar bu depoda henüz doğrulanmamıştır.
+
+## Şartnameye göre eksikler (güncel)
+
+- **Gerçek sıcaklık (°C):** Kameraya özgü radyometrik veri çözücü yoktur. Sistem fiilen yalnızca DN (görece) değerleri üretir; çevre karşılaştırması ve histogram da DN cinsindendir.
+- **Yaşam belirtisi:** Etiketli gerçek termal video ile hiç doğrulanmamıştır. Bulgu yalnızca keşif amaçlıdır.
+- **Başarım:** Precision 0,31 / Recall 0,26 ölçülmüştür; dedektör iyileştirmesi yapılmamıştır. Farklı çevre koşullarında karşılaştırmalı inceleme yapılmamıştır.
+- **Veri seti belgelendirmesi:** Yukarıdaki tablo boştur.
 
 ## Önemli teknik sınırlamalar
 
 1. Aday bölgeler doğrulanmış kişi değildir. Eşikleme ve geometri, insanı sıcak nesnelerden, hayvanlardan, yansımalardan ya da araziden güvenilir biçimde ayıramaz.
 2. Video ROI eşleştirmesi basit bir en yakın merkez sezgisidir; kamera hareketi, örtülme ve kesişen kişiler iz kimliğini bozabilir.
 3. Mevcut zamansal sinyal, kalibre edilmiş sıcaklık değil, DN cinsinden gri seviye piksel yoğunluğudur.
-4. Solunum bandındaki periyodiklik keşif amaçlıdır ve doğrulanmamıştır. Olumlu bileşen nefes almanın ya da yaşamın kanıtı değildir; olumsuz sonuç da ölümün kanıtı değildir.
+4. Solunum bandındaki periyodiklik keşif amaçlıdır ve gerçek veriyle doğrulanmamıştır. Algılayıcı, tepe gücünü sinyalin kendi 1/f arka plan eğrisiyle karşılaştırır ve en az 3 tam döngü ister. Yalnızca simülasyonla sınanmıştır: hiç solunum yokken (beyaz/pembe gürültü, rastgele sürüklenme) yanlış olumlu oranı 20 sn'lik sinyalde yaklaşık %2–4, 60 sn'lik sinyalde yaklaşık %0 çıkmıştır; gürültü genliğine eşit bir periyodik bileşen yaklaşık %95+ yakalanır. Gerçek kamera gürültüsü (otomatik kazanç, hareket, hava akımı) bunlardan farklıdır, bu oranlar gerçek başarım değildir. Olumlu bileşen nefes almanın ya da yaşamın kanıtı değildir; olumsuz sonuç da ölümün kanıtı değildir.
 5. API'ye kameraya özgü bir radyometrik çözücü/kalibrasyon adaptörü bağlı değildir.
-6. Etiketli gerçek kamera verisiyle bir kıyaslama henüz tamamlanmamıştır; Precision, Recall, F1, sıcaklık hatası ve solunum algılama başarımı bilinmemektedir. Yalnızca gayriresmî bir görsel kontrol vardır ("Dedektör değerlendirmesi" bölümüne bakın). Hayvanlar insanlardan ayrılamaz, yakın plan özneler parçalara bölünebilir, küçük öznelerden oluşan yoğun kalabalıklar eksik sayılır.
+6. Yalnızca 10 etiketli görüntüyle bir ilk ölçüm yapılmıştır (Precision 0,31, Recall 0,26); sıcaklık hatası ve solunum algılama başarımı bilinmemektedir ("Dedektör değerlendirmesi" bölümüne bakın). Hayvanlar insanlardan ayrılamaz, yakın plan özneler parçalara bölünebilir, küçük öznelerden oluşan yoğun kalabalıklar eksik sayılır.
 7. PostgreSQL analiz üst verisini ve sonuç JSON'unu saklar. Yüklenen kaynak medya dosyalarının kendisi veritabanında ya da nesne depolamada arşivlenmez.
 
 ## Güvenlik

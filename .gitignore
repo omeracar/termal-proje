@@ -16,7 +16,6 @@ __pycache__/
 data/raw/
 data/processed/
 data/eval_vis/
-data/eval_result.json
 !data/samples/.gitkeep
 
 # IDE

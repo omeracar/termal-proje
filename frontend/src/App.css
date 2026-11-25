@@ -216,3 +216,18 @@ input[type="file"] {
   .history-item { flex-direction: column; }
   .history-actions { width: 100%; justify-content: flex-start; }
 }
+
+
+/* Isı haritası, histogram, video önizleme */
+.finding { font-size: 1.05rem; }
+.heatmap-row { display: flex; gap: 8px; align-items: stretch; }
+.heatmap-row img { max-width: 100%; height: auto; }
+.heatmap-legend { display: flex; flex-direction: column; justify-content: space-between; font-size: 0.8rem; opacity: 0.8; }
+.histogram { margin: 6px 0 12px; max-width: 360px; }
+.hist-bars { display: flex; align-items: flex-end; gap: 2px; height: 70px; border-bottom: 1px solid currentColor; }
+.hist-bar { flex: 1; background: #d9822b; min-height: 1px; }
+.hist-axis { display: flex; justify-content: space-between; font-size: 0.75rem; opacity: 0.8; }
+.preview-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.preview-grid figure { margin: 0; flex: 1 1 200px; max-width: 320px; }
+.preview-grid img { width: 100%; height: auto; display: block; }
+.preview-grid figcaption { font-size: 0.8rem; opacity: 0.8; }

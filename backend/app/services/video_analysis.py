@@ -8,8 +8,9 @@ import cv2
 import numpy as np
 from scipy.interpolate import interp1d
 
-from app.services.image_processing import ImageProcessingService, to_gray
-from app.services.vital_signs import VitalSignsService
+from app.services.image_processing import ImageProcessingService, to_bgr8, to_gray
+from app.services.vital_signs import VitalSignsService, with_finding
+import base64
 
 
 class ThermalVideoAnalysisService:
@@ -47,6 +48,11 @@ class ThermalVideoAnalysisService:
         sampled_frames = 0
         diagonal = float(np.hypot(width, height))
         max_match_distance = max(20.0, diagonal * 0.12)
+        # Önizleme için en çok 40 küçültülmüş kare saklanır (bellek sınırı)
+        estimated_samples = max(1, frame_count // stride)
+        keep_every = max(1, int(np.ceil(estimated_samples / 40)))
+        preview_scale = min(1.0, 480.0 / max(width, 1))
+        stored: Dict[int, Dict[str, Any]] = {}
 
         try:
             while True:
@@ -58,6 +64,7 @@ class ThermalVideoAnalysisService:
                     candidates, _ = self.detector.detect_people(frame)
                     gray = to_gray(frame)
                     assignments = set()
+                    sample_boxes: List[Any] = []
 
                     # Mevcut izlere açgözlü en yakın merkez eşleştirmesi.
                     for candidate in candidates:
@@ -90,6 +97,11 @@ class ThermalVideoAnalysisService:
                         track["last_sample"] = sampled_frames
                         track["detections"] += 1
                         assignments.add(best_id)
+                        sample_boxes.append((best_id, x, y, w, h))
+                    if (sampled_frames - 1) % keep_every == 0:
+                        small = cv2.resize(frame, None, fx=preview_scale, fy=preview_scale) \
+                            if preview_scale < 1.0 else frame.copy()
+                        stored[sampled_frames - 1] = {"frame": small, "boxes": sample_boxes}
                 frame_index += 1
         finally:
             cap.release()
@@ -105,10 +117,10 @@ class ThermalVideoAnalysisService:
             coverage = len(values) / max(total_samples, 1)
             # Uzun örtülmeleri ve çoğunlukla eksik tespitleri köprüleme.
             if coverage < 0.70:
-                vital_result = {
+                vital_result = with_finding({
                     "status": "insufficient_data",
                     "message": "İz kapsama oranı %70'in altında; zamansal analiz yapılmadı.",
-                }
+                })
             else:
                 timeline = np.arange(total_samples, dtype=np.float64)
                 series = interp1d(indices, values, kind="linear",
@@ -125,7 +137,11 @@ class ThermalVideoAnalysisService:
                 "vital_signs": vital_result,
             })
 
+        kept_ids = {r["track_id"] for r in results}
+        preview_frames = self._build_previews(stored, kept_ids, preview_scale, sampled_fps)
+
         return {
+            "preview_frames": preview_frames,
             "video": {
                 "width": width, "height": height, "source_fps": fps,
                 "frame_count": frame_count, "duration_s": round(duration, 2),
@@ -140,3 +156,28 @@ class ThermalVideoAnalysisService:
                 "Periyodik bileşenler nefes almanın veya yaşamın kanıtı değildir; bulunmamaları da ölümün kanıtı değildir."
             ),
         }
+
+    @staticmethod
+    def _build_previews(stored, kept_ids, scale, sampled_fps):
+        """Saklanan kareler arasından ilk, orta ve son kareyi seçip iz kutularıyla çizer."""
+        if not stored:
+            return []
+        keys = sorted(stored)
+        chosen = sorted({keys[0], keys[len(keys) // 2], keys[-1]})
+        previews = []
+        for key in chosen:
+            frame = to_bgr8(stored[key]["frame"]).copy()
+            for track_id, x, y, w, h in stored[key]["boxes"]:
+                if track_id not in kept_ids:
+                    continue
+                x0, y0, x1, y1 = (int(round(v * scale)) for v in (x, y, x + w, y + h))
+                cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 220, 0), 2)
+                cv2.putText(frame, f"#{track_id}", (x0, max(14, y0 - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 0), 2, cv2.LINE_AA)
+            ok, enc = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if ok:
+                previews.append({
+                    "time_s": round(key / sampled_fps, 2),
+                    "image": "data:image/jpeg;base64," + base64.b64encode(enc.tobytes()).decode("ascii"),
+                })
+        return previews

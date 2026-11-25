@@ -14,6 +14,8 @@ from app.models import AnalysisRecord
 from app.services.image_processing import ImageProcessingService
 from app.services.temperature_analysis import TemperatureAnalysisService
 from app.services.video_analysis import ThermalVideoAnalysisService
+from app.services.visualization import build_heatmap
+from app.services.vital_signs import with_finding
 
 router = APIRouter(prefix="/api/v1", tags=["Analyze"])
 processor = ImageProcessingService()
@@ -28,11 +30,18 @@ MAX_VIDEO_BYTES = 200 * 1024 * 1024
 def _run_analysis(image: np.ndarray):
     candidates, method = processor.detect_people(image)
     annotated = processor.draw_detections(image, candidates)
-    measurements = [temperature_service.analyze_region(image, item) for item in candidates]
+    measurements = []
+    for item in candidates:
+        stats = temperature_service.analyze_region(image, item)
+        stats["background_comparison"] = temperature_service.compare_with_surroundings(image, item)
+        stats["distribution"] = temperature_service.region_distribution(image, item)
+        measurements.append(stats)
     ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 92])
-    if not ok:
+    ok_heat, heat_encoded = cv2.imencode(".jpg", build_heatmap(image, candidates),
+                                         [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok or not ok_heat:
         raise RuntimeError("Sonuç görüntüsü kodlanamadı")
-    return candidates, method, measurements, encoded
+    return candidates, method, measurements, encoded, heat_encoded
 
 
 def _save_record(db: Session, **values) -> AnalysisRecord:
@@ -55,12 +64,12 @@ async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_
     if image is None:
         raise HTTPException(status_code=400, detail="Görüntü çözülemedi")
     try:
-        candidates, method, measurements, encoded = await run_in_threadpool(_run_analysis, image)
+        candidates, method, measurements, encoded, heat_encoded = await run_in_threadpool(_run_analysis, image)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    vital = {"status": "insufficient_data",
-             "message": "Tek bir görüntüyle zamansal solunum sinyali analizi yapılamaz."}
+    vital = with_finding({"status": "insufficient_data",
+                          "message": "Tek bir görüntüyle zamansal solunum sinyali analizi yapılamaz."})
     result_data = {
         "image_shape": list(image.shape), "method": method,
         "detection_semantics": "thermal_candidate_regions_not_confirmed_people",
@@ -86,12 +95,15 @@ async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_
         raise HTTPException(status_code=503, detail="Analiz tamamlandı ancak veritabanına kaydedilemedi. PostgreSQL ayarlarını kontrol edin.") from exc
 
     annotated_b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
+    heatmap_b64 = base64.b64encode(heat_encoded.tobytes()).decode("ascii")
     return {
         "analysis_id": record.id, "message": "Analiz tamamlandı ve kaydedildi",
         "original_filename": file.filename, **result_data,
         "person_count": None, "candidate_count": len(candidates),
         "temperature_analysis": measurements, "vital_signs": vital,
         "annotated_image": f"data:image/jpeg;base64,{annotated_b64}",
+        "heatmap_image": f"data:image/jpeg;base64,{heatmap_b64}",
+        "heatmap_note": "Renkler görece piksel yoğunluğunu gösterir (koyu = düşük, açık sarı = yüksek); kalibre edilmiş °C değildir.",
         "num_candidates": len(candidates),
     }
 
@@ -110,6 +122,7 @@ async def analyze_video(file: UploadFile = File(...), db: Session = Depends(get_
             temp_file.write(contents)
             temp_path = temp_file.name
         result = await run_in_threadpool(video_processor.analyze, temp_path)
+        previews = result.pop("preview_frames", [])  # büyük görüntüler veritabanına yazılmaz
         duration = float(result["video"]["duration_s"])
         record = _save_record(
             db, analysis_type="video", original_filename=(file.filename or "upload")[:255],
@@ -126,7 +139,8 @@ async def analyze_video(file: UploadFile = File(...), db: Session = Depends(get_
             result_data=result,
         )
         return {"analysis_id": record.id, "message": "Video analizi tamamlandı ve kaydedildi",
-                "original_filename": file.filename, **result}
+                "original_filename": file.filename, **result,
+                "preview_frames": previews}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:

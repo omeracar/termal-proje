@@ -1,4 +1,6 @@
 """Kayıtlı analizler için indirilebilir PDF raporları üretir."""
+import json
+import os
 from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -28,6 +30,17 @@ def _register_unicode_font():
                 pdfmetrics.registerFontFamily("ThermalUnicode", normal="ThermalUnicode", bold="ThermalUnicode-Bold")
             return "ThermalUnicode"
     return "Helvetica"
+
+
+def _load_eval_metrics():
+    """data/eval_metrics.json (evaluate_detector.py çıktısı) varsa okur; yoksa None döner."""
+    default = Path(__file__).resolve().parents[3] / "data" / "eval_metrics.json"
+    path = Path(os.getenv("EVAL_METRICS_PATH", str(default)))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data.get("summary"), dict) else None
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 def _safe(value):
@@ -112,6 +125,35 @@ def build_analysis_pdf(record) -> bytes:
         story.append(Paragraph(f"<b>{_safe(section.replace('_', ' ').title())}</b>", styles["BodyText"]))
         story.append(Paragraph(_safe(payload)[:5000], styles["SmallNote"]))
         story.append(Spacer(1, 2 * mm))
+
+    metrics = _load_eval_metrics()
+    if metrics:
+        m = metrics["summary"]
+        story.extend([Spacer(1, 4 * mm), Paragraph("Dedektör doğrulama ölçümleri", styles["Heading2"])])
+        metric_rows = [
+            ["Etiketli görüntü sayısı", str(m.get("images", "—"))],
+            ["Doğru tespit (TP)", str(m.get("tp", "—"))],
+            ["Yanlış tespit (FP)", str(m.get("fp", "—"))],
+            ["Tespit edilemeyen kişi (FN)", str(m.get("fn", "—"))],
+            ["Precision", str(m.get("precision", "—"))],
+            ["Recall", str(m.get("recall", "—"))],
+            ["F1-Score", str(m.get("f1", "—"))],
+            ["Görüntü başına ortalama süre (s)", str(m.get("mean_seconds_per_image", "—"))],
+            ["Eşleşme eşiği (IoU)", str(m.get("iou_threshold", "—"))],
+        ]
+        metric_table = Table([[Paragraph(_safe(a), styles["BodyText"]), Paragraph(_safe(b), styles["BodyText"])]
+                              for a, b in metric_rows], colWidths=[85 * mm, 81 * mm])
+        metric_table.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C8D0D8")),
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#EAF0F5")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        story.extend([
+            metric_table,
+            Paragraph("Bu ölçümler elle etiketlenmiş küçük bir gerçek görüntü kümesine aittir; bu kayıttaki "
+                      "görüntünün başarımını değil, dedektörün genel durumunu gösterir ve genelleştirilemez.",
+                      styles["SmallNote"]),
+        ])
 
     story.extend([
         Spacer(1, 4 * mm),

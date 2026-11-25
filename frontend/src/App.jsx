@@ -4,6 +4,29 @@ import './App.css'
 
 const API = 'http://localhost:8000/api/v1'
 
+const unitLabel = (unit) => (unit === 'degC' ? '°C' : 'DN (görece)')
+
+function Histogram({ dist }) {
+  if (!dist?.available) return null
+  const max = Math.max(...dist.counts, 1)
+  const lo = dist.bin_edges[0]
+  const hi = dist.bin_edges[dist.bin_edges.length - 1]
+  return (
+    <div className="histogram" role="img" aria-label="Bölge içi değer dağılımı histogramı">
+      <div className="hist-bars">
+        {dist.counts.map((c, i) => (
+          <div key={i} className="hist-bar" style={{ height: `${(c / max) * 100}%` }}
+            title={`${dist.bin_edges[i]} – ${dist.bin_edges[i + 1]}: ${c} piksel`} />
+        ))}
+      </div>
+      <div className="hist-axis">
+        <span>{lo}</span><span>{unitLabel(dist.unit)}</span><span>{hi}</span>
+      </div>
+      <small>Yüzdelikler: %10 = {dist.p10}, %50 = {dist.p50}, %90 = {dist.p90}</small>
+    </div>
+  )
+}
+
 function App() {
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
@@ -105,10 +128,31 @@ function App() {
             <p className="warning">Bunlar doğrulanmış insan tespiti değil, klasik görüntü işlemeyle bulunan aday bölgelerdir.</p>
             {result.annotated_image && <div className="annotated"><img src={result.annotated_image} alt="Aday bölgelerin işaretlendiği sonuç görüntüsü" /></div>}
             {candidates.map((p, i) => <p key={i}>Aday {i + 1}: x={p.x}, y={p.y}, w={p.w}, h={p.h}; skor={p.score}</p>)}
-            <h4>Piksel Yoğunluğu Analizi</h4>
-            <p>{result.temperature_warning}</p>
-            {result.temperature_analysis?.map((item, i) => <p key={i}>Aday {i + 1}: ortalama {item.mean?.toFixed(2)} {item.unit}, min {item.min?.toFixed(2)}, max {item.max?.toFixed(2)}</p>)}
+            <h4>Sıcaklık / Piksel Yoğunluğu Analizi</h4>
+            <p className="warning">{result.temperature_warning}</p>
+            {result.heatmap_image && (
+              <div className="heatmap">
+                <h5>Isı haritası (görece yoğunluk)</h5>
+                <div className="heatmap-row">
+                  <img src={result.heatmap_image} alt="Renk haritasıyla gösterilen görece piksel yoğunluğu" />
+                  <div className="heatmap-legend"><span>yüksek</span><span>düşük</span></div>
+                </div>
+                <small>{result.heatmap_note}</small>
+              </div>
+            )}
+            {result.temperature_analysis?.map((item, i) => (
+              <div className="candidates" key={i}>
+                <h5>Aday {i + 1}</h5>
+                <p>Ortalama {item.mean?.toFixed(2)} {unitLabel(item.unit)}, min {item.min?.toFixed(2)}, max {item.max?.toFixed(2)}, std {item.std?.toFixed(2)}</p>
+                {item.background_comparison?.available && (
+                  <p><strong>Çevre karşılaştırması:</strong> aday {item.background_comparison.candidate_mean}, çevre {item.background_comparison.background_mean}, fark {item.background_comparison.difference} {unitLabel(item.background_comparison.unit)}
+                    {item.background_comparison.note ? ` — ${item.background_comparison.note}` : ''}</p>
+                )}
+                <Histogram dist={item.distribution} />
+              </div>
+            ))}
             <h4>Yaşam Belirtisi</h4>
+            <p className="finding"><strong>{result.vital_signs?.finding}</strong></p>
             <p>{result.vital_signs?.message}</p>
           </>}
           {result.video && <>
@@ -116,13 +160,27 @@ function App() {
             <p>İşlenen kare: {result.video.sampled_frames} / {result.video.frame_count}</p>
             <p>Aday takip sayısı: {result.track_count}</p>
             <p className="warning">{result.interpretation_warning}</p>
+            {result.preview_frames?.length > 0 && (
+              <div className="video-previews">
+                <h4>İşaretli kare önizlemeleri</h4>
+                <div className="preview-grid">
+                  {result.preview_frames.map((f, i) => (
+                    <figure key={i}>
+                      <img src={f.image} alt={`Videonun ${f.time_s}. saniyesindeki işaretli kare`} />
+                      <figcaption>{f.time_s} sn</figcaption>
+                    </figure>
+                  ))}
+                </div>
+              </div>
+            )}
             {tracks.map((track) => (
               <div className="candidates" key={track.track_id}>
                 <h4>Aday takip #{track.track_id}</h4>
                 <p>Gözlem: {track.candidate_observations} | Kapsama: %{Math.round(track.coverage * 100)}</p>
                 <p>Sinyal: {track.signal_description} ({track.signal_unit})</p>
-                <p><strong>Değerlendirme:</strong> {track.vital_signs?.message}</p>
-                {track.vital_signs?.details && <p>Dominant frekans: {track.vital_signs.details.dominant_frequency_hz} Hz | Bant içi oran: {track.vital_signs.details.respiratory_band_rate_per_min} / dakika | SNR: {track.vital_signs.details.peak_to_median_snr_db} dB</p>}
+                <p className="finding"><strong>{track.vital_signs?.finding}</strong></p>
+                <p>{track.vital_signs?.message}</p>
+                {track.vital_signs?.details && <p>Dominant frekans: {track.vital_signs.details.dominant_frequency_hz} Hz | Bant içi oran: {track.vital_signs.details.respiratory_band_rate_per_min} / dakika | Tepe / arka plan: {track.vital_signs.details.peak_to_trend_db} dB (eşik {track.vital_signs.details.threshold_db} dB)</p>}
               </div>
             ))}
           </>}

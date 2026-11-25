@@ -1,10 +1,10 @@
 """
-Classical thermal-image candidate detection.
+Klasik termal görüntü işleme ile aday bölge tespiti.
 
-No AI, machine-learning model, pretrained weights, or network download is used.
-The output is a list of regions that may contain a person; it is NOT a
-semantic person classifier. Thresholds and geometry are heuristic and must
-be validated against labelled real thermal-camera data (see scripts/evaluate_detector.py).
+Yapay zekâ, makine öğrenmesi modeli, hazır ağırlık ya da ağdan model indirme KULLANILMAZ.
+Çıktı, içinde insan bulunabilecek bölgelerin listesidir; anlamsal bir insan sınıflandırıcısı DEĞİLDİR.
+Eşikler ve geometri kuralları sezgiseldir; etiketli gerçek termal kamera verisiyle
+doğrulanmalıdır (bkz. scripts/evaluate_detector.py).
 """
 from typing import Any, Dict, List, Tuple
 
@@ -17,9 +17,9 @@ METHOD_NAME = "classical-multilevel-contours"
 
 
 def to_gray(image: np.ndarray) -> np.ndarray:
-    """Convert an image to a single-channel 8-bit analysis image."""
+    """Görüntüyü tek kanallı, 8 bitlik analiz görüntüsüne çevirir."""
     if image is None or image.size == 0:
-        raise ValueError("Empty image")
+        raise ValueError("Boş görüntü")
     if image.ndim == 2:
         gray = image
     elif image.ndim == 3 and image.shape[2] == 4:
@@ -27,7 +27,7 @@ def to_gray(image: np.ndarray) -> np.ndarray:
     elif image.ndim == 3 and image.shape[2] == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     else:
-        raise ValueError(f"Unsupported image shape: {image.shape}")
+        raise ValueError(f"Desteklenmeyen görüntü boyutu: {image.shape}")
     if gray.dtype == np.uint8:
         return gray
     values = gray.astype(np.float32)
@@ -47,14 +47,14 @@ class ImageProcessingService:
         self.detector = ClassicalPersonDetector()
 
     def preprocess(self, image: np.ndarray) -> np.ndarray:
-        """Contrast-enhanced 8-bit image (kept for visual inspection / debugging)."""
+        """Kontrastı artırılmış 8 bitlik görüntü (gözle inceleme ve hata ayıklama için saklanır)."""
         gray = to_gray(image)
         denoised = cv2.medianBlur(gray, 3)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         return clahe.apply(denoised)
 
     def detect_people(self, image: np.ndarray) -> Tuple[List[Dict[str, Any]], str]:
-        """Return geometric/thermal candidates, not confirmed people."""
+        """Geometrik/termal aday bölgeleri döndürür; doğrulanmış kişi değildir."""
         gray = to_gray(image)
         boxes = self.detector.detect(gray)
 
@@ -64,7 +64,7 @@ class ImageProcessingService:
             roi = gray[y:y + h, x:x + w]
             candidates.append({
                 "x": x, "y": y, "w": w, "h": h,
-                # A ranking heuristic only; never call this a probability.
+                # Yalnızca sıralama için sezgisel bir değerdir; olasılık olarak yorumlanmamalıdır.
                 "score": round(float(box["score"]), 3),
                 "area_px": int(w * h),
                 "aspect_ratio": round(h / float(w), 3),

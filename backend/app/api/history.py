@@ -39,7 +39,7 @@ def list_analyses(
 def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     record = db.query(AnalysisRecord).filter(AnalysisRecord.id == analysis_id).first()
     if record is None:
-        raise HTTPException(status_code=404, detail="Analysis record not found")
+        raise HTTPException(status_code=404, detail="Analiz kaydı bulunamadı")
     return {**_record_json(record), "result_data": record.result_data or {}, "notes": record.notes}
 
 
@@ -47,7 +47,7 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
 def download_report(analysis_id: int, db: Session = Depends(get_db)):
     record = db.query(AnalysisRecord).filter(AnalysisRecord.id == analysis_id).first()
     if record is None:
-        raise HTTPException(status_code=404, detail="Analysis record not found")
+        raise HTTPException(status_code=404, detail="Analiz kaydı bulunamadı")
     pdf = build_analysis_pdf(record)
     filename = f"thermal-analysis-{record.id}.pdf"
     return Response(

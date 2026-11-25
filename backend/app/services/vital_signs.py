@@ -1,4 +1,4 @@
-"""Exploratory periodic thermal-signal analysis; not a medical or life-status test."""
+"""Keşif amaçlı periyodik termal sinyal analizi; tıbbi bir test ya da yaşam durumu testi değildir."""
 from typing import Any, Dict, List
 import numpy as np
 from scipy.signal import detrend, find_peaks, welch
@@ -10,25 +10,25 @@ class VitalSignsService:
     ) -> Dict[str, Any]:
         values = np.asarray(temperature_series, dtype=np.float64)
         if fps <= 0 or values.ndim != 1 or not np.all(np.isfinite(values)):
-            return {"status": "insufficient_data", "message": "Invalid sampling rate or signal"}
+            return {"status": "insufficient_data", "message": "Örnekleme hızı veya sinyal geçersiz"}
         duration = len(values) / fps
         if len(values) < max(60, int(fps * 10)) or duration < 10:
             return {
                 "status": "insufficient_data",
-                "message": "At least 10 seconds of valid, consistently sampled video data is required.",
+                "message": "En az 10 saniyelik, düzenli örneklenmiş geçerli video verisi gerekir.",
             }
         signal = detrend(values, type="linear")
         if float(np.std(signal)) < 1e-6:
             return {
                 "status": "not_detected",
-                "message": "No measurable periodic thermal variation was detected.",
+                "message": "Ölçülebilir periyodik termal değişim saptanmadı.",
                 "details": {"duration_s": duration, "sampling_rate_hz": fps},
             }
 
         frequencies, power = welch(signal, fs=fps, nperseg=min(len(signal), max(64, int(fps * 20))))
         band = (frequencies >= 0.10) & (frequencies <= 0.70)
         if np.count_nonzero(band) < 3:
-            return {"status": "insufficient_data", "message": "Frequency resolution is insufficient."}
+            return {"status": "insufficient_data", "message": "Frekans çözünürlüğü yetersiz."}
         band_power = power[band]
         band_freq = frequencies[band]
         peak_index = int(np.argmax(band_power))
@@ -41,9 +41,9 @@ class VitalSignsService:
         return {
             "status": "periodic_signal_detected" if detected else "not_detected",
             "message": (
-                "A periodic thermal component compatible with a respiratory-rate band was detected; this is not proof of breathing or life."
+                "Solunum hızı bandıyla uyumlu periyodik bir termal bileşen saptandı; bu, nefes alındığının veya yaşamın kanıtı değildir."
                 if detected else
-                "No sufficiently prominent respiratory-band periodic thermal component was detected; this does not establish absence of life."
+                "Solunum bandında yeterince belirgin periyodik termal bileşen saptanmadı; bu, yaşamın olmadığını göstermez."
             ),
             "details": {
                 "duration_s": round(duration, 2),
@@ -55,9 +55,9 @@ class VitalSignsService:
                 "snr_threshold_db": 6.0,
             },
             "limitations": [
-                "Exploratory signal analysis only; not a validated vital-sign detector.",
-                "Requires stable camera geometry, sufficient frame rate, a suitable ROI and ground-truth validation.",
-                "Motion, airflow, occlusion and camera auto-ranging can create or suppress periodic signals.",
-                "A positive or negative result must never be interpreted as confirmation of life or death.",
+                "Yalnızca keşif amaçlı sinyal analizidir; doğrulanmış bir yaşam belirtisi algılayıcısı değildir.",
+                "Sabit kamera geometrisi, yeterli kare hızı, uygun bir ilgi bölgesi ve gerçek veriyle doğrulama gerektirir.",
+                "Hareket, hava akımı, örtülme ve kameranın otomatik aralık ayarı periyodik sinyal oluşturabilir ya da bastırabilir.",
+                "Olumlu ya da olumsuz sonuç hiçbir zaman yaşamın veya ölümün doğrulaması olarak yorumlanmamalıdır.",
             ],
         }

@@ -1,97 +1,100 @@
-# Thermal Camera Search-and-Rescue Decision-Support Prototype
+# Termal Kamera ile Kayıp Personel Tespiti – Karar Destek Prototipi
 
-## Implemented in this development branch
+Termal görüntülerde **insan olabilecek bölgeleri** klasik görüntü işleme yöntemleriyle bulan, sonuçları PostgreSQL'e kaydeden ve PDF rapor üreten bir araştırma prototipidir.
 
-- Classical OpenCV candidate extraction: denoising, local-contrast map, multi-level adaptive thresholding, morphology, contour/geometry filters, splitting of side-by-side blobs, merging of stacked fragments and rejection of UI graphics (colour bars, text).
-- Candidate regions are explicitly not labelled as confirmed people.
-- Raw pixel intensity (DN) is separated from calibrated radiometric temperature (°C).
-- Still-image and video analysis endpoints.
-- Heuristic video ROI association and exploratory Welch PSD signal analysis.
-- PostgreSQL persistence for image and video analysis results.
-- Analysis history and detail endpoints.
-- Downloadable PDF report for every saved analysis.
-- React interface for upload, history, record details and PDF downloads.
-- No AI, machine-learning model, pretrained weights or model download is used.
+> **Yapay zekâ, makine öğrenmesi, hazır model ya da model indirme kullanılmaz.** Yalnızca eşikleme, morfoloji, kontur/geometri ve sinyal işleme yöntemleri vardır.
 
-## PostgreSQL setup
+## Uygulananlar
 
-The repository includes a local PostgreSQL service in `docker-compose.yml`.
+- Klasik OpenCV ile aday bölge çıkarımı: gürültü azaltma, yerel kontrast haritası, çok seviyeli adaptif eşikleme, morfoloji, kontur/geometri filtreleri, yan yana duran kişilerin ayrılması, parçalanmış kişilerin birleştirilmesi ve arayüz grafiklerinin (renk skalası, yazı) elenmesi.
+- Aday bölgeler açıkça "doğrulanmış kişi" olarak etiketlenmez.
+- Ham piksel yoğunluğu (DN) ile kalibre edilmiş radyometrik sıcaklık (°C) birbirinden ayrı tutulur.
+- Görüntü ve video analizi uç noktaları.
+- Sezgisel video ilgi bölgesi (ROI) takibi ve keşif amaçlı Welch PSD sinyal analizi.
+- Görüntü ve video sonuçlarının PostgreSQL'e kaydı.
+- Analiz geçmişi ve ayrıntı uç noktaları.
+- Her kayıtlı analiz için indirilebilir PDF rapor.
+- Yükleme, geçmiş, kayıt ayrıntıları ve PDF indirme için React arayüzü.
 
-1. Start PostgreSQL from the repository root:
+## PostgreSQL kurulumu
+
+Depoda `docker-compose.yml` içinde yerel bir PostgreSQL servisi vardır.
+
+1. Depo kök klasöründen PostgreSQL'i başlatın:
 ```bash
 docker compose up -d postgres
 ```
 
-2. Create the backend environment file:
+2. Arka uç ortam dosyasını oluşturun:
 ```bash
 cd backend
 cp .env.example .env
 ```
 
-3. Install backend requirements and start the API:
+3. Gereksinimleri kurun ve API'yi başlatın:
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-The example connection string targets the local Docker PostgreSQL service:
+Örnek bağlantı adresi yerel Docker PostgreSQL servisini hedefler:
 `postgresql+psycopg2://thermal_user:thermal_password@localhost:5432/thermal_camera`
 
-On API startup, SQLAlchemy creates the `analysis_records` table if it does not exist. For this prototype, schema initialization uses `create_all`; a versioned Alembic migration workflow should be added before production deployment.
+API açılırken SQLAlchemy gerekli tabloları yoksa oluşturur. Bu prototipte şema oluşturma `create_all` ile yapılır; üretim ortamına geçmeden önce sürümlü bir Alembic göç (migration) düzeni eklenmelidir.
 
-For quick local development without PostgreSQL, remove/rename `backend/.env` and the application falls back to a local SQLite database file.
+PostgreSQL olmadan hızlı yerel geliştirme için `backend/.env` dosyasını silin ya da yeniden adlandırın; uygulama yerel bir SQLite dosyasına geçer.
 
-## Analysis history and PDF endpoints
+## Analiz geçmişi ve PDF uç noktaları
 
-- `POST /api/v1/analyze` — analyze an image and persist its result.
-- `POST /api/v1/analyze-video` — analyze a video and persist its result.
-- `GET /api/v1/analyses?limit=50&offset=0` — list saved analyses.
-- `GET /api/v1/analyses/{id}` — retrieve one analysis and its stored result data.
-- `GET /api/v1/analyses/{id}/report.pdf` — download a PDF report.
+- `POST /api/v1/analyze` — görüntüyü analiz eder ve sonucu kaydeder.
+- `POST /api/v1/analyze-video` — videoyu analiz eder ve sonucu kaydeder.
+- `GET /api/v1/analyses?limit=50&offset=0` — kayıtlı analizleri listeler.
+- `GET /api/v1/analyses/{id}` — tek bir analizi ve saklanan sonuç verisini getirir.
+- `GET /api/v1/analyses/{id}/report.pdf` — PDF raporu indirir.
 
-PDF reports include analysis metadata, summary metrics, technical result data and interpretation/safety limitations. A Unicode font is used when a supported DejaVu Sans, Liberation Sans or Arial font is available on the host.
+PDF raporları analiz üst verisini, özet ölçütleri, teknik sonuç verisini ve yorum/güvenlik sınırlamalarını içerir. Sunucuda DejaVu Sans, Liberation Sans ya da Arial gibi Unicode destekli bir yazı tipi varsa Türkçe karakterler korunur; yoksa ASCII'ye çevrilir.
 
-## Frontend
+## Arayüz
 
-From `frontend`:
+`frontend` klasöründen:
 ```bash
 npm install
 npm run dev
 ```
 
-The frontend displays the analysis ID, refreshable analysis history, stored record details and PDF download links.
+Arayüz analiz numarasını, yenilenebilir analiz geçmişini, kayıt ayrıntılarını ve PDF indirme bağlantılarını gösterir.
 
-## Detector evaluation
+## Dedektör değerlendirmesi
 
-Real precision/recall/F1 needs hand-labelled ground truth. Label your images with the bundled mouse-driven tool:
+Gerçek Precision/Recall/F1 değerleri için elle etiketlenmiş gerçek veri gerekir. Görüntüleri depodaki fareyle çalışan araçla etiketleyin:
 
-1. Open `tools/label_boxes.html` in a browser (double-click; no server, no internet needed).
-2. Click **Klasör seç** and choose `data/samples` (or **Görüntü seç** for single files).
-3. Drag a box tightly around every visible person. `E` marks an image as "no people", `Z` undoes, `Delete` removes the selected box, arrow keys switch images. Progress is autosaved in the browser.
-4. Click **Dışa aktar** and save the downloaded `ground_truth.json` into `data/samples/`. Only reviewed images are exported.
-5. Run the evaluation (add `--vis` to get result images: green = correct, red = false detection, yellow = missed person):
+1. `tools/label_boxes.html` dosyasını tarayıcıda açın (çift tıklama yeterli; sunucu ya da internet gerekmez).
+2. **Klasör seç** düğmesiyle `data/samples` klasörünü seçin (tek dosyalar için **Görüntü seç**).
+3. Görünen her kişinin etrafına sıkı bir kutu sürükleyerek çizin. `E` tuşu görüntüyü "insan yok" olarak işaretler, `Z` geri alır, `Delete` seçili kutuyu siler, ok tuşları görüntüler arasında geçer. İlerleme tarayıcıda otomatik kaydedilir.
+4. **Dışa aktar** düğmesine basın ve inen `ground_truth.json` dosyasını `data/samples/` içine koyun. Yalnızca gözden geçirilmiş görüntüler dışa aktarılır.
+5. Değerlendirmeyi çalıştırın (`--vis` ile sonuç resimleri de üretilir: yeşil = doğru, kırmızı = yanlış tespit, sarı = kaçırılan kişi):
 
 ```bash
 cd backend
 python scripts/evaluate_detector.py --images ../data/samples --truth ../data/samples/ground_truth.json --vis ../data/eval_vis --out ../data/eval_result.json
 ```
 
-Boxes are `[x, y, width, height]` in image pixels; a detection counts as correct when IoU >= 0.5 (one-to-one greedy matching). Ground-truth JSON may be loaded back into the tool with **Etiket yükle (JSON)** to continue labelling.
+Kutular görüntü pikseli cinsinden `[x, y, genişlik, yükseklik]` biçimindedir; IoU ≥ 0,5 olan tespit doğru sayılır (bire bir açgözlü eşleştirme). Etiket dosyası **Etiket yükle (JSON)** ile araca geri yüklenip etiketlemeye devam edilebilir.
 
-Informal check, 11 real thermal images (people counted by eye, NOT labelled ground truth, so these are not precision/recall values): the detector matched the counted number exactly on 3 images, was within one on 3 more, and was off by three or more on the remaining 5 (animals, close-up subjects, distant or dense crowds, a cluttered street scene with 12 candidates for 7 people). Mean time was about 0.12 s per image on a CPU.
+Gayriresmî kontrol, 11 gerçek termal görüntü (kişiler gözle sayıldı, etiketli doğru veri DEĞİL; dolayısıyla Precision/Recall değeri değildir): dedektör 3 görüntüde sayıyı tam bildi, 3 görüntüde bir kişi farkla bildi, kalan 5 görüntüde üç veya daha fazla fark verdi (hayvanlar, yakın plan özneler, uzak ya da yoğun kalabalıklar, 7 kişi için 12 aday çıkan kalabalık bir sokak sahnesi). Ortalama süre işlemcide görüntü başına yaklaşık 0,12 saniyedir.
 
-## Important technical limitations
+## Önemli teknik sınırlamalar
 
-1. Candidate regions are not confirmed people. Thresholding and geometry cannot reliably distinguish humans from hot objects, animals, reflections or terrain.
-2. Video ROI association is a simple nearest-centroid heuristic; camera motion, occlusion and crossing people can break track identity.
-3. The current temporal signal is grayscale pixel intensity in DN, not calibrated temperature.
-4. Respiratory-band periodicity is exploratory and unvalidated. A positive component is not proof of breathing or life; a negative result is not proof of death.
-5. No camera-specific radiometric decoder/calibration adapter is connected to the API.
-6. No labelled real-camera benchmark has been executed; precision, recall, F1, temperature error and respiratory detection performance are unknown. Only an informal visual check exists (see "Detector evaluation"). Animals are not separated from people, close-up subjects may be split into fragments and dense crowds of small subjects are under-counted.
-7. PostgreSQL stores analysis metadata and result JSON. Uploaded source media files themselves are not archived in the database or object storage.
+1. Aday bölgeler doğrulanmış kişi değildir. Eşikleme ve geometri, insanı sıcak nesnelerden, hayvanlardan, yansımalardan ya da araziden güvenilir biçimde ayıramaz.
+2. Video ROI eşleştirmesi basit bir en yakın merkez sezgisidir; kamera hareketi, örtülme ve kesişen kişiler iz kimliğini bozabilir.
+3. Mevcut zamansal sinyal, kalibre edilmiş sıcaklık değil, DN cinsinden gri seviye piksel yoğunluğudur.
+4. Solunum bandındaki periyodiklik keşif amaçlıdır ve doğrulanmamıştır. Olumlu bileşen nefes almanın ya da yaşamın kanıtı değildir; olumsuz sonuç da ölümün kanıtı değildir.
+5. API'ye kameraya özgü bir radyometrik çözücü/kalibrasyon adaptörü bağlı değildir.
+6. Etiketli gerçek kamera verisiyle bir kıyaslama henüz tamamlanmamıştır; Precision, Recall, F1, sıcaklık hatası ve solunum algılama başarımı bilinmemektedir. Yalnızca gayriresmî bir görsel kontrol vardır ("Dedektör değerlendirmesi" bölümüne bakın). Hayvanlar insanlardan ayrılamaz, yakın plan özneler parçalara bölünebilir, küçük öznelerden oluşan yoğun kalabalıklar eksik sayılır.
+7. PostgreSQL analiz üst verisini ve sonuç JSON'unu saklar. Yüklenen kaynak medya dosyalarının kendisi veritabanında ya da nesne depolamada arşivlenmez.
 
-## Safety
+## Güvenlik
 
-This is a research prototype, not a medical device or validated search-and-rescue life detector. Never use its output as the sole basis for rescue, triage or life/death decisions. Human review and independent rescue procedures remain essential.
+Bu bir araştırma prototipidir; tıbbi cihaz ya da doğrulanmış bir arama-kurtarma yaşam algılayıcısı değildir. Çıktısı, kurtarma, triyaj ya da yaşam/ölüm kararlarında asla tek dayanak olarak kullanılmamalıdır. İnsan denetimi ve bağımsız kurtarma prosedürleri vazgeçilmezdir.
 
-API documentation: `http://localhost:8000/docs`
+API belgeleri: `http://localhost:8000/docs`

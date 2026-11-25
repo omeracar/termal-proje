@@ -1,4 +1,4 @@
-"""Temperature statistics with strict separation of radiometric values and display pixels."""
+"""Radyometrik değerler ile görüntüleme piksellerini kesin biçimde ayıran sıcaklık istatistikleri."""
 from typing import Any, Dict, Optional
 import numpy as np
 
@@ -9,7 +9,7 @@ class TemperatureAnalysisService:
         x, y, w, h = (int(region[k]) for k in ("x", "y", "w", "h"))
         roi = array[y:y + h, x:x + w]
         if roi.size == 0:
-            raise ValueError("The selected region is empty")
+            raise ValueError("Seçilen bölge boş")
         return roi.astype(np.float64)
 
     def analyze_region(
@@ -18,14 +18,14 @@ class TemperatureAnalysisService:
         region: Dict[str, Any],
         temperature_map_c: Optional[np.ndarray] = None,
     ) -> Dict[str, Any]:
-        """Only temperature_map_c may be reported in °C; raw image levels are not temperatures."""
+        """Yalnızca temperature_map_c °C olarak raporlanabilir; ham görüntü seviyeleri sıcaklık değildir."""
         if temperature_map_c is not None:
             if temperature_map_c.shape[:2] != image.shape[:2]:
-                raise ValueError("Temperature map dimensions must match the image")
+                raise ValueError("Sıcaklık haritasının boyutları görüntüyle aynı olmalıdır")
             values = self._roi(temperature_map_c, region)
             values = values[np.isfinite(values)]
             if values.size == 0:
-                raise ValueError("No valid radiometric samples in region")
+                raise ValueError("Bölgede geçerli radyometrik örnek yok")
             return {
                 "measurement_type": "radiometric_temperature",
                 "unit": "degC",
@@ -47,7 +47,7 @@ class TemperatureAnalysisService:
             "std": float(np.std(values)),
             "sample_count": int(values.size),
             "calibration_provided": False,
-            "warning": "Pixel intensity is not a temperature. A calibrated radiometric temperature matrix is required for °C.",
+            "warning": "Piksel yoğunluğu sıcaklık değildir. °C değeri için kalibre edilmiş radyometrik sıcaklık matrisi gerekir.",
         }
 
     def compare_with_background(
@@ -56,7 +56,7 @@ class TemperatureAnalysisService:
         region: Dict[str, Any],
         margin: int = 8,
     ) -> Dict[str, Any]:
-        """Compare a candidate ROI with a surrounding ring in a calibrated °C map."""
+        """Kalibre edilmiş °C haritasında aday bölgeyi çevresindeki halkayla karşılaştırır."""
         x, y, w, h = (int(region[k]) for k in ("x", "y", "w", "h"))
         height, width = temperature_map_c.shape[:2]
         x0, y0 = max(0, x - margin), max(0, y - margin)
@@ -67,7 +67,7 @@ class TemperatureAnalysisService:
         background = outer[np.isfinite(outer)]
         foreground = inner[np.isfinite(inner)]
         if not background.size or not foreground.size:
-            return {"available": False, "reason": "Insufficient valid pixels"}
+            return {"available": False, "reason": "Yeterli geçerli piksel yok"}
         fg, bg = float(np.mean(foreground)), float(np.mean(background))
         return {
             "available": True, "unit": "degC",

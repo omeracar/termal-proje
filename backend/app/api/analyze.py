@@ -31,7 +31,7 @@ def _run_analysis(image: np.ndarray):
     measurements = [temperature_service.analyze_region(image, item) for item in candidates]
     ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 92])
     if not ok:
-        raise RuntimeError("Could not encode result image")
+        raise RuntimeError("Sonuç görüntüsü kodlanamadı")
     return candidates, method, measurements, encoded
 
 
@@ -47,25 +47,25 @@ def _save_record(db: Session, **values) -> AnalysisRecord:
 async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_db)):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in IMAGE_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Use JPG, PNG, TIFF or BMP for image analysis")
+        raise HTTPException(status_code=400, detail="Görüntü analizi için JPG, PNG, TIFF veya BMP kullanın")
     contents = await file.read(MAX_IMAGE_BYTES + 1)
     if len(contents) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="Maximum image upload size is 25 MB")
+        raise HTTPException(status_code=413, detail="En büyük görüntü yükleme boyutu 25 MB")
     image = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_UNCHANGED)
     if image is None:
-        raise HTTPException(status_code=400, detail="Image could not be decoded")
+        raise HTTPException(status_code=400, detail="Görüntü çözülemedi")
     try:
         candidates, method, measurements, encoded = await run_in_threadpool(_run_analysis, image)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     vital = {"status": "insufficient_data",
-             "message": "A single image cannot support temporal respiratory-signal analysis."}
+             "message": "Tek bir görüntüyle zamansal solunum sinyali analizi yapılamaz."}
     result_data = {
         "image_shape": list(image.shape), "method": method,
         "detection_semantics": "thermal_candidate_regions_not_confirmed_people",
         "candidates": candidates, "temperature_analysis": measurements,
-        "temperature_warning": "Pixel levels are DN, not °C. A calibrated radiometric temperature matrix is required for physical temperature values.",
+        "temperature_warning": "Piksel seviyeleri DN cinsindendir, °C değildir. Fiziksel sıcaklık için kalibre edilmiş radyometrik sıcaklık matrisi gerekir.",
         "vital_signs": vital,
     }
     try:
@@ -83,11 +83,11 @@ async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_
         )
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=503, detail="Analysis completed but database save failed. Check PostgreSQL configuration.") from exc
+        raise HTTPException(status_code=503, detail="Analiz tamamlandı ancak veritabanına kaydedilemedi. PostgreSQL ayarlarını kontrol edin.") from exc
 
     annotated_b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
     return {
-        "analysis_id": record.id, "message": "Analysis completed and saved",
+        "analysis_id": record.id, "message": "Analiz tamamlandı ve kaydedildi",
         "original_filename": file.filename, **result_data,
         "person_count": None, "candidate_count": len(candidates),
         "temperature_analysis": measurements, "vital_signs": vital,
@@ -100,10 +100,10 @@ async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_
 async def analyze_video(file: UploadFile = File(...), db: Session = Depends(get_db)):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in VIDEO_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Use MP4, AVI, MOV or MKV for video analysis")
+        raise HTTPException(status_code=400, detail="Video analizi için MP4, AVI, MOV veya MKV kullanın")
     contents = await file.read(MAX_VIDEO_BYTES + 1)
     if len(contents) > MAX_VIDEO_BYTES:
-        raise HTTPException(status_code=413, detail="Maximum video upload size is 200 MB")
+        raise HTTPException(status_code=413, detail="En büyük video yükleme boyutu 200 MB")
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
@@ -125,13 +125,13 @@ async def analyze_video(file: UploadFile = File(...), db: Session = Depends(get_
             },
             result_data=result,
         )
-        return {"analysis_id": record.id, "message": "Video analysis completed and saved",
+        return {"analysis_id": record.id, "message": "Video analizi tamamlandı ve kaydedildi",
                 "original_filename": file.filename, **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=503, detail="Video analysis could not be saved. Check PostgreSQL configuration.") from exc
+        raise HTTPException(status_code=503, detail="Video analizi kaydedilemedi. PostgreSQL ayarlarını kontrol edin.") from exc
     finally:
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)

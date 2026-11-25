@@ -1,7 +1,7 @@
-"""Video pipeline: frame sampling, heuristic ROI association and temporal thermal signal extraction.
+"""Video işleme hattı: kare örnekleme, sezgisel ilgi bölgesi (ROI) eşleştirme ve zamansal termal sinyal çıkarımı.
 
-Tracks are candidate regions, not confirmed people. Pixel intensity is DN unless a
-camera-specific radiometric temperature stream is supplied (not implemented here).
+İzler aday bölgelerdir, doğrulanmış kişi değildir. Kameraya özgü bir radyometrik sıcaklık akışı
+verilmedikçe (burada uygulanmamıştır) piksel yoğunluğu DN cinsindendir.
 """
 from typing import Any, Dict, List
 import cv2
@@ -19,10 +19,10 @@ class ThermalVideoAnalysisService:
 
     def analyze(self, video_path: str, max_sample_rate_hz: float = 10.0) -> Dict[str, Any]:
         if not np.isfinite(max_sample_rate_hz) or max_sample_rate_hz <= 0:
-            raise ValueError("max_sample_rate_hz must be greater than zero")
+            raise ValueError("max_sample_rate_hz sıfırdan büyük olmalıdır")
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            raise ValueError("Video could not be opened. Check codec and file integrity.")
+            raise ValueError("Video açılamadı. Codec ve dosya bütünlüğünü kontrol edin.")
 
         fps = float(cap.get(cv2.CAP_PROP_FPS))
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -30,15 +30,15 @@ class ThermalVideoAnalysisService:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         if not np.isfinite(fps) or fps <= 0 or frame_count <= 0:
             cap.release()
-            raise ValueError("Video metadata does not contain a valid FPS/frame count.")
+            raise ValueError("Video üst verisinde geçerli FPS/kare sayısı yok.")
 
         duration = frame_count / fps
         if duration > 600:
             cap.release()
-            raise ValueError("Video duration exceeds the 10-minute analysis limit")
+            raise ValueError("Video süresi 10 dakikalık analiz sınırını aşıyor")
         if width <= 0 or height <= 0 or width * height > 3840 * 2160:
             cap.release()
-            raise ValueError("Video dimensions are invalid or exceed 4K")
+            raise ValueError("Video boyutları geçersiz ya da 4K sınırını aşıyor")
         stride = max(1, int(round(fps / max_sample_rate_hz)))
         sampled_fps = fps / stride
         tracks: Dict[int, Dict[str, Any]] = {}
@@ -59,7 +59,7 @@ class ThermalVideoAnalysisService:
                     gray = to_gray(frame)
                     assignments = set()
 
-                    # Greedy nearest-centroid association to existing tracks.
+                    # Mevcut izlere açgözlü en yakın merkez eşleştirmesi.
                     for candidate in candidates:
                         cx = candidate["x"] + candidate["w"] / 2.0
                         cy = candidate["y"] + candidate["h"] / 2.0
@@ -103,11 +103,11 @@ class ThermalVideoAnalysisService:
             indices = np.asarray([v[0] for v in observations], dtype=np.float64)
             values = np.asarray([v[1] for v in observations], dtype=np.float64)
             coverage = len(values) / max(total_samples, 1)
-            # Do not bridge long occlusions or mostly missing detections.
+            # Uzun örtülmeleri ve çoğunlukla eksik tespitleri köprüleme.
             if coverage < 0.70:
                 vital_result = {
                     "status": "insufficient_data",
-                    "message": "Track coverage is below 70%; temporal analysis was withheld.",
+                    "message": "İz kapsama oranı %70'in altında; zamansal analiz yapılmadı.",
                 }
             else:
                 timeline = np.arange(total_samples, dtype=np.float64)
@@ -121,7 +121,7 @@ class ThermalVideoAnalysisService:
                 "candidate_observations": len(observations),
                 "coverage": round(float(coverage), 3),
                 "signal_unit": "DN",
-                "signal_description": "Mean grayscale pixel intensity within the tracked candidate ROI",
+                "signal_description": "İzlenen aday ROI içindeki ortalama gri seviye piksel yoğunluğu",
                 "vital_signs": vital_result,
             })
 
@@ -135,8 +135,8 @@ class ThermalVideoAnalysisService:
             "track_count": len(results),
             "tracks": results,
             "interpretation_warning": (
-                "Tracks are heuristic thermal candidate regions, not confirmed people. "
-                "The signal is pixel intensity (DN), not calibrated temperature. "
-                "Periodic components are not proof of breathing or life; absence is not proof of death."
+                "İzler sezgisel termal aday bölgelerdir, doğrulanmış kişi değildir. "
+                "Sinyal piksel yoğunluğudur (DN), kalibre edilmiş sıcaklık değildir. "
+                "Periyodik bileşenler nefes almanın veya yaşamın kanıtı değildir; bulunmamaları da ölümün kanıtı değildir."
             ),
         }

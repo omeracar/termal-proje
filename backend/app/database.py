@@ -23,6 +23,6 @@ def get_db():
 
 
 def init_database():
-    # Import models before create_all so their tables are registered on Base.
+    # create_all çağrılmadan önce modeller içe aktarılır; böylece tabloları Base'e kaydolur.
     from app import models  # noqa: F401
     Base.metadata.create_all(bind=engine)

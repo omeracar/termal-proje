@@ -62,6 +62,7 @@ def main():
     ap.add_argument("--post", type=float, default=3.5)
     ap.add_argument("--shuffles", type=int, default=100)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--json", help="Özet sonucu JSON olarak yaz")
     args = ap.parse_args()
 
     data = np.load(args.npz)
@@ -105,6 +106,18 @@ def main():
         r, c = divmod(int(k), tw)
         lag = lags[int(np.argmax(np.abs(curve[:, k])))]
         print(f"  ({c * args.tile:3d},{r * args.tile:3d})  {amp[k]:.3f} °C  z={z[k]:5.1f}  gecikme {lag:+.2f} s")
+    if args.json:
+        import json
+        Path(args.json).write_text(json.dumps({
+            "frames": int(len(times)), "fps": round(fps, 2), "tile_px": args.tile,
+            "events_used": used, "events_total": int(len(events)),
+            "observed_max_amplitude_c": round(float(amp.max()), 3),
+            "null_max_amplitude_mean_c": round(float(np.mean(null_max)), 3),
+            "null_max_amplitude_max_c": round(float(np.max(null_max)), 3),
+            "p_fwer": round(p_fwer, 4), "shuffles": args.shuffles,
+            "top_tiles": [{"x": int(k % tw) * args.tile, "y": int(k // tw) * args.tile,
+                           "amplitude_c": round(float(amp[k]), 3), "z": round(float(z[k]), 2)} for k in top],
+        }, indent=2, ensure_ascii=False), encoding="utf-8")
     print("YORUM: p < 0.05 ve yan yana kümelenmiş parlak kareler varsa nefesle bağlı bir termal sinyal VARDIR.")
     print("       p yüksekse bu kayıtta (bu çözünürlükte) nefesle bağlı sinyal ayırt edilemiyor.")
 

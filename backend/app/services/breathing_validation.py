@@ -163,3 +163,83 @@ def validate_breathing(
             "tolerance_per_min": tolerance_per_min,
         },
     }
+
+
+def hot_track(raw: np.ndarray, chunk: int = 200, hot_fraction: float = 0.6):
+    """Her karede en büyük sıcak bileşeni (baş/gövde) bulup ağırlık merkezini izler.
+
+    Eşik, karenin ortancası ile %99,5'lik değeri arasında `hot_fraction` noktasıdır (sezgisel).
+    Döndürür: (merkezler (n,2) [x,y], hiç-sıcak-olmayan-piksel için 'hiç sıcak oldu' maskesi (h,w)).
+    """
+    n, height, width = raw.shape
+    centers = np.full((n, 2), np.nan)
+    ever = np.zeros((height, width), dtype=bool)
+    kernel = np.ones((3, 3), np.uint8)
+    for start in range(0, n, chunk):
+        block = raw[start:start + chunk].astype(np.float32)
+        for j, frame in enumerate(block):
+            sub = frame[::2, ::2]
+            lo, hi = float(np.median(sub)), float(np.percentile(sub, 99.5))
+            if hi - lo < 1e-6:
+                continue
+            mask = (frame >= lo + hot_fraction * (hi - lo)).astype(np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            count, labels, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
+            if count <= 1:
+                continue
+            best = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+            centers[start + j] = cents[best]
+            ever |= labels == best
+    return centers, ever
+
+
+def head_shifts(centers: np.ndarray, smooth: int = 5) -> np.ndarray:
+    """Merkezlerin ortanca konuma göre kaymaları (n,2); eksikler ara değerlenir, ortanca süzgeçle yumuşatılır."""
+    from scipy.ndimage import median_filter
+    out = np.empty_like(centers)
+    idx = np.arange(len(centers))
+    for axis in range(2):
+        col = centers[:, axis]
+        ok = np.isfinite(col)
+        col = np.interp(idx, idx[ok], col[ok]) if ok.any() else np.zeros(len(col))
+        out[:, axis] = median_filter(col - np.median(col), size=smooth, mode="nearest")
+    return out
+
+
+def tracked_roi_series(raw: np.ndarray, roi: Tuple[int, int, int, int], shifts: np.ndarray) -> np.ndarray:
+    """ROI kutusunu her karede baş kaymasıyla birlikte oynatıp ortalama sıcaklığı (°C) döndürür."""
+    x, y, w, h = roi
+    n, height, width = raw.shape
+    out = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        x0 = int(np.clip(x + int(round(shifts[i, 0])), 0, width - w))
+        y0 = int(np.clip(y + int(round(shifts[i, 1])), 0, height - h))
+        out[i] = raw[i, y0:y0 + h, x0:x0 + w].mean(dtype=np.float64)
+    return celsius_from_raw(out)
+
+
+def static_background_series(raw: np.ndarray, ever_hot: np.ndarray, chunk: int = 200) -> np.ndarray:
+    """Hiçbir karede sıcak bileşene ait olmayan (genişletilmiş) piksellerin kare başına ortalaması (°C).
+
+    Kameranın tüm görüntüyü etkileyen ani kayması (otomatik kalibrasyon vb.) bu seride de görünür.
+    """
+    dilated = cv2.dilate(ever_hot.astype(np.uint8), np.ones((31, 31), np.uint8)).astype(bool)
+    mask = ~dilated
+    if mask.sum() < 50:
+        mask = ~ever_hot
+    out = np.empty(len(raw), dtype=np.float64)
+    for start in range(0, len(raw), chunk):
+        out[start:start + chunk] = raw[start:start + chunk][:, mask].mean(axis=1, dtype=np.float64)
+    return celsius_from_raw(out)
+
+
+def count_steps(series: np.ndarray, fps: float, threshold_c: float = 0.4, window_s: float = 0.5) -> int:
+    """`window_s` içinde `threshold_c`'den büyük sıçrama sayısı (1 sn içindeki sıçramalar tek sayılır)."""
+    k = max(1, int(round(window_s * fps)))
+    jump = np.abs(series[k:] - series[:-k]) > threshold_c
+    count, last = 0, -10 ** 9
+    for i in np.where(jump)[0]:
+        if i - last > fps:
+            count += 1
+        last = i
+    return count

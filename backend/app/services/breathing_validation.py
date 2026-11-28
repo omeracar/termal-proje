@@ -49,6 +49,19 @@ def parse_event_times(source: "str | Path") -> np.ndarray:
     return np.asarray(times, dtype=np.float64)[rising]
 
 
+def reference_time_range(source: "str | Path") -> Tuple[float, float, int]:
+    """Referans CSV'sinin ilk/son satır zamanı (epoch saniye, UTC kabul) ve satır sayısı."""
+    stamps = []
+    for row in csv.reader(io.StringIO(Path(source).read_text(encoding="utf-8"))):
+        if len(row) == 2 and row[1].strip():
+            try:
+                stamps.append(dt.datetime.strptime(row[0].strip(), "%Y%m%d-%H:%M:%S.%f")
+                              .replace(tzinfo=dt.timezone.utc).timestamp())
+            except ValueError:
+                continue
+    return (stamps[0], stamps[-1], len(stamps)) if stamps else (float("nan"), float("nan"), 0)
+
+
 def reference_rate_per_min(event_times: Sequence[float], start: float, end: float,
                            min_events: int = 4) -> Optional[float]:
     """Pencere içindeki olayların ortanca aralığından nefes/dakika (yetersizse None)."""
@@ -64,7 +77,11 @@ def auto_roi(frames_celsius: np.ndarray, percentile: float = 95.0) -> Tuple[int,
     Sezgiseldir: kameraya yakın tek kişilik kayıtlarda yüz/baş bölgesini yakalamayı hedefler.
     Doğruluğu gerçek kayıtta gözle doğrulanmalıdır.
     """
-    mean = frames_celsius.mean(axis=0)
+    return auto_roi_from_mean(frames_celsius.mean(axis=0), percentile)
+
+
+def auto_roi_from_mean(mean: np.ndarray, percentile: float = 95.0) -> Tuple[int, int, int, int]:
+    """auto_roi ile aynı, ancak hazır bir ortalama kareden (büyük kayıtlarda bellek tasarrufu)."""
     mask = (mean >= np.percentile(mean, percentile)).astype(np.uint8)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     if count <= 1:

@@ -19,7 +19,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.breathing_validation import (  # noqa: E402
-    auto_roi, celsius_from_raw, parse_event_times, roi_series, validate_breathing,
+    auto_roi_from_mean, celsius_from_raw, parse_event_times, reference_time_range, validate_breathing,
 )
 
 
@@ -39,24 +39,31 @@ def main():
     args = ap.parse_args()
 
     data = np.load(args.npz)
-    frames = celsius_from_raw(data["frames"])
+    raw = data["frames"]  # uint16; tamamı float'a çevrilmez (bellek)
+    n_frames = len(raw)
+    mean_raw = np.zeros(raw.shape[1:], dtype=np.float64)
+    for i in range(0, n_frames, 200):
+        mean_raw += raw[i:i + 200].sum(axis=0, dtype=np.float64)
+    mean_celsius = celsius_from_raw(mean_raw / n_frames)
     times = data["bag_time_s" if args.time_source == "bag" else "header_time_s"]
-    roi = auto_roi(frames) if args.roi == "auto" else tuple(int(v) for v in args.roi.split(","))
+    roi = auto_roi_from_mean(mean_celsius) if args.roi == "auto" else tuple(int(v) for v in args.roi.split(","))
     events = parse_event_times(Path(args.reference))
-    print(f"Kare: {len(frames)}, ROI (x,y,w,h): {roi}, referans nefes olayı: {len(events)}")
+    print(f"Kare: {n_frames}, ROI (x,y,w,h): {roi}, referans nefes olayı: {len(events)}")
     print(f"Kayıt aralığı (epoch): {times[0]:.1f} – {times[-1]:.1f}; ilk/son olay: {events[0]:.1f} – {events[-1]:.1f}")
     if events[-1] < times[0] or events[0] > times[-1]:
         print("UYARI: referans zamanları kayıtla örtüşmüyor. Yanlış kişi/saat dilimi olabilir.")
 
     if args.roi_preview:
-        mean = frames.mean(axis=0)
-        gray = cv2.normalize(mean, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        gray = cv2.normalize(mean_celsius, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         vis = cv2.applyColorMap(gray, cv2.COLORMAP_INFERNO)
         x, y, w, h = roi
         cv2.rectangle(vis, (x, y), (x + w, y + h), (255, 255, 255), 1)
         cv2.imwrite(args.roi_preview, cv2.resize(vis, None, fx=3, fy=3, interpolation=cv2.INTER_NEAREST))
 
-    series = roi_series(frames, roi)
+    x, y, w, h = roi
+    series = celsius_from_raw(raw[:, y:y + h, x:x + w].reshape(n_frames, -1).mean(axis=1, dtype=np.float64))
+    ref_first, ref_last, ref_rows = reference_time_range(args.reference)
+    print(f"Referans CSV: {ref_rows} satır (kare sayısı {n_frames}); ilk satır − ilk kare = {ref_first - times[0]:+.2f} s")
     result = validate_breathing(times, series, events, args.window, args.step, args.offset)
     result["roi"] = list(roi)
     print(json.dumps(result["summary"], indent=2, ensure_ascii=False))

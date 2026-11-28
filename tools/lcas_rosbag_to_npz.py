@@ -81,7 +81,9 @@ def main():
             return 2
         conn = images[0]
 
-        bag_times, header_times, frames = [], [], []
+        bag_times, header_times = [], []
+        frames = None  # ilk mesajda, mesaj sayısına göre bir kez ayrılır (bellek dostu)
+        written = 0
         meta = {}
         for _, ts, raw in reader.messages(connections=[conn]):
             msg = typestore.deserialize_ros1(raw, conn.msgtype)
@@ -99,8 +101,12 @@ def main():
                 return 2
             dtype = DECODABLE[meta["encoding"]].newbyteorder(">" if meta["is_bigendian"] else "<")
             frame = np.frombuffer(bytes(msg.data), dtype=dtype).reshape(meta["height"], -1)[:, :meta["width"]]
-            frames.append(frame.copy())
-            if args.max_frames and len(frames) >= args.max_frames:
+            if frames is None:
+                total = conn.msgcount if not args.max_frames else min(conn.msgcount, args.max_frames)
+                frames = np.empty((total, meta["height"], meta["width"]), dtype=frame.dtype)
+            frames[written] = frame
+            written += 1
+            if written >= len(frames):
                 break
 
     print("\nKare hızı (rosbag kayıt zamanına göre):")
@@ -108,14 +114,15 @@ def main():
     print("Kare hızı (mesaj başlığındaki header.stamp'e göre):")
     print(json.dumps(rate_stats(header_times), indent=2))
     if args.info:
-        if frames == [] and meta:
+        if meta:
             print("\nBu rapor hiçbir dosya yazmadı. Çıktıyı bana yapıştırın.")
         return 0
 
     out = Path(args.out)
+    frames = frames[:written]
     np.savez_compressed(
-        out, frames=np.stack(frames), bag_time_s=np.asarray(bag_times[:len(frames)]),
-        header_time_s=np.asarray(header_times[:len(frames)]),
+        out, frames=frames, bag_time_s=np.asarray(bag_times[:written]),
+        header_time_s=np.asarray(header_times[:written]),
         meta=json.dumps({**meta, "topic": conn.topic, "celsius_formula": "(raw - 1000) / 10",
                          "source_bag": Path(args.bag).name}),
     )

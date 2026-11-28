@@ -129,3 +129,27 @@ def test_video_api_returns_previews_but_does_not_store_them(client, tmp_path):
     with Session() as db:
         record = db.query(AnalysisRecord).one()
         assert "preview_frames" not in (record.result_data or {})
+
+
+def test_image_api_celsius_with_user_formula_and_16bit(client):
+    http, _ = client
+    raw = (_person_image().astype(np.uint16) * 2 + 1000)  # (ham-1000)/10 -> 8..~85 °C aralığı
+    ok, buf = cv2.imencode(".png", raw)
+    r = http.post("/api/v1/analyze", files={"file": ("t.png", buf.tobytes(), "image/png")},
+                  data={"raw_offset": "1000", "raw_scale": "10"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["temperature_unit"] == "degC"
+    assert body["temperature_analysis"], "aday bulunmalı"
+    for item in body["temperature_analysis"]:
+        assert item["background_comparison"]["unit"] == "degC"
+        assert item["distribution"]["unit"] == "degC"
+    assert "kullanıcı" in body["temperature_warning"]
+
+
+def test_image_api_rejects_formula_on_8bit_and_half_params(client):
+    http, _ = client
+    ok, buf = cv2.imencode(".png", _person_image())
+    files = {"file": ("t.png", buf.tobytes(), "image/png")}
+    assert http.post("/api/v1/analyze", files=files, data={"raw_offset": "1000", "raw_scale": "10"}).status_code == 422
+    assert http.post("/api/v1/analyze", files=files, data={"raw_offset": "1000"}).status_code == 422

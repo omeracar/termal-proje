@@ -104,9 +104,25 @@ Ayrıntılı görüntü bazlı sonuçlar `data/eval_metrics.json` dosyasındadı
 
 ## Solunum algılayıcısının doğrulanması (LCAS veri seti)
 
-Yaşam belirtisi (solunum) analizi şu ana kadar yalnızca simülasyonla sınanmıştır. Gerçek veriyle sınamak için [LCAS Thermal Physiological Monitoring Dataset](https://lcas.lincoln.ac.uk/wp/research/data-sets-software/lcas-thermal-physiological-monitoring-dataset/) kullanılır (Optris PI-450 termal kamera, radyometrik veri: °C = (ham − 1000) / 10, referans solunum olay kaydı; lisans CC BY-NC-SA 3.0, yalnızca ticari olmayan kullanım — veri setinin kendisi depoya eklenmez, `data/validation/` git'e girmez).
+Yaşam belirtisi (solunum) algılayıcısı önce simülasyonla, ardından gerçek kayıtlarla sınanmıştır. Gerçek veriyle sınamak için [LCAS Thermal Physiological Monitoring Dataset](https://lcas.lincoln.ac.uk/wp/research/data-sets-software/lcas-thermal-physiological-monitoring-dataset/) kullanılır (Optris PI-450 termal kamera, radyometrik veri: °C = (ham − 1000) / 10, referans solunum olay kaydı; lisans CC BY-NC-SA 3.0, yalnızca ticari olmayan kullanım — veri setinin kendisi depoya eklenmez, `data/validation/` git'e girmez).
 
-**Durum: hat hazır, gerçek kayıtla henüz çalıştırılmadı; bu bölümde başarım değeri yoktur.**
+**Sonuç: Bu yöntemle solunum, LCAS kayıtlarında referansla doğrulanamadı (olumsuz bulgu).**
+
+5 kişinin hepsinde (Joao, anestis, Claudio, Manuel, Jaime; yaklaşık 26–27 Hz Optris PI-450 kaydı, `scripts/lcas_batch.py` ile çalıştırıldı) 40 sn'lik pencerelerde otomatik ROI ile algılama oranı 0 çıktı; ortalama mutlak hata 13–19 nefes/dk. Dört ROI yapılandırması (sabit, sabit − arka plan, baş takipli, baş takipli − arka plan) denendi, hiçbirinde tutarlı iyileşme olmadı (yalnızca Jaime'de bir yapılandırma pencerelerin %20'sinde ±3 nefes/dk içinde kaldı). Olay-tetikli ortalama tanılamasında (referans kullanan, başarım ölçütü olmayan bir tanı) beş testten yalnızca Jaime anlamlı çıktı (p=0,0099, sınırda); Joao (0,079) ve Manuel (0,059) anlamlı değil, anestis (0,63) ve Claudio (0,50) sinyal göstermedi.
+
+| Kişi | fps | Algılama oranı | Ort. hata (nefes/dk) | ±3 içinde | Olay-tetikli p |
+|---|---|---|---|---|---|
+| Joao | 26,9 | 0,0 | 13,52 | 0,0 | 0,079 |
+| anestis | 26,5 | 0,0 | 18,55 | 0,0 | 0,634 |
+| Claudio | 26,8 | 0,0 | 14,39 | 0,0 | 0,495 |
+| Manuel | 26,4 | 0,0 | 12,96 | 0,0 | 0,059 |
+| Jaime | 26,5 | 0,0 | 15,62 | 0,0 | 0,0099 |
+
+Gözlemler ve sınırlar:
+- Sabit ROI ortalama serisinde yaklaşık 1–1,5 °C'lik ani basamaklar görüldü (kamera kaymaları/yeniden kalibrasyon olabilir; kesin neden belirlenmedi). Solunum genliği bu basamakların çok altında kalıyor. Ardışık özdeş ROI değeri oranı kayıtlarda %6–7 çıktı (yinelenen kareler).
+- Başarısızlığın nedeni bilinmemektedir: kayıtta solunum bulunmaması, ROI'nin yanlış seçilmesi, kamera/sensör gürültüsü ya da algılayıcının kendisi olabilir. Bu sonuç "kişi nefes almıyor" anlamına gelmez, "bu yöntem bu kayıtlarda referansı yakalayamadı" anlamına gelir.
+- Otomatik ROI sezgiseldir (en sıcak bağlı bileşen). Algılayıcı eşikleri bu kayıtlara göre ayarlanmamıştır; çok sayıda ROI/yapılandırma deneyip en iyisini seçmek seçim yanlılığı yaratacağından tüm sonuçlar raporlanmıştır.
+- `scripts/lcas_batch.py` tüm kişiler için tek komutla yeniden üretir (`--bags`, `--truth`, `--out`).
 
 1. Veri setinden bir kişinin `.bag` dosyasını ve aynı kişinin `*_respiration.csv` dosyasını indirin (ikisinin zaman damgası aynı olmalı, örn. `2016-11-22-14-23-08-Claudio`).
 2. Rosbag'i inceleyin (gerçek kare hızı, konu adı, kodlama; hiçbir şey yazmaz):
@@ -137,8 +153,8 @@ Betik, ROI (`auto` = en sıcak bölge; ya da `--roi x,y,w,h`) ortalama sıcaklı
 
 ## Şartnameye göre eksikler (güncel)
 
-- **Gerçek sıcaklık (°C):** Kameraya özgü radyometrik veri çözücü yoktur. Sistem fiilen yalnızca DN (görece) değerleri üretir; çevre karşılaştırması ve histogram da DN cinsindendir.
-- **Yaşam belirtisi:** Etiketli gerçek termal video ile hiç doğrulanmamıştır. Bulgu yalnızca keşif amaçlıdır.
+- **Gerçek sıcaklık (°C):** `/api/v1/analyze` artık 16 bit tek kanallı TIFF/PNG için `raw_offset` ve `raw_scale` form alanlarıyla °C = (ham − offset) / scale hesaplar (ortalama, min/max, çevre farkı, histogram °C olur). Formül kameraya özgüdür ve kullanıcı tarafından verilir; sistem kalibrasyonu doğrulamaz, sıcaklık ölçüm hatası referans veriyle ölçülmemiştir. Arayüzde bu iki alan henüz yoktur (yalnızca API).
+- **Yaşam belirtisi:** LCAS ile gerçek doğrulama yapıldı ve olumsuz çıktı (yukarıdaki bölüm). Bulgu yalnızca keşif amaçlıdır.
 - **Başarım:** Precision 0,31 / Recall 0,26 ölçülmüştür; dedektör iyileştirmesi yapılmamıştır. Farklı çevre koşullarında karşılaştırmalı inceleme yapılmamıştır.
 - **Veri seti belgelendirmesi:** Yukarıdaki tablo boştur.
 
@@ -146,10 +162,10 @@ Betik, ROI (`auto` = en sıcak bölge; ya da `--roi x,y,w,h`) ortalama sıcaklı
 
 1. Aday bölgeler doğrulanmış kişi değildir. Eşikleme ve geometri, insanı sıcak nesnelerden, hayvanlardan, yansımalardan ya da araziden güvenilir biçimde ayıramaz.
 2. Video ROI eşleştirmesi basit bir en yakın merkez sezgisidir; kamera hareketi, örtülme ve kesişen kişiler iz kimliğini bozabilir.
-3. Mevcut zamansal sinyal, kalibre edilmiş sıcaklık değil, DN cinsinden gri seviye piksel yoğunluğudur.
-4. Solunum bandındaki periyodiklik keşif amaçlıdır ve gerçek veriyle doğrulanmamıştır. Algılayıcı, tepe gücünü sinyalin kendi 1/f arka plan eğrisiyle karşılaştırır ve en az 3 tam döngü ister. Yalnızca simülasyonla sınanmıştır: hiç solunum yokken (beyaz/pembe gürültü, rastgele sürüklenme) yanlış olumlu oranı 20 sn'lik sinyalde yaklaşık %2–4, 60 sn'lik sinyalde yaklaşık %0 çıkmıştır; gürültü genliğine eşit bir periyodik bileşen yaklaşık %95+ yakalanır. Gerçek kamera gürültüsü (otomatik kazanç, hareket, hava akımı) bunlardan farklıdır, bu oranlar gerçek başarım değildir. Olumlu bileşen nefes almanın ya da yaşamın kanıtı değildir; olumsuz sonuç da ölümün kanıtı değildir.
-5. API'ye kameraya özgü bir radyometrik çözücü/kalibrasyon adaptörü bağlı değildir.
-6. Yalnızca 10 etiketli görüntüyle bir ilk ölçüm yapılmıştır (Precision 0,31, Recall 0,26); sıcaklık hatası ve solunum algılama başarımı bilinmemektedir ("Dedektör değerlendirmesi" bölümüne bakın). Hayvanlar insanlardan ayrılamaz, yakın plan özneler parçalara bölünebilir, küçük öznelerden oluşan yoğun kalabalıklar eksik sayılır.
+3. Video analizinde zamansal sinyal DN cinsinden gri seviye piksel yoğunluğudur; °C yalnızca tek görüntü API'sinde, kullanıcı formülüyle hesaplanır.
+4. Solunum bandındaki periyodiklik keşif amaçlıdır ve gerçek LCAS kayıtlarında doğrulanamamıştır (yukarıya bakın). Algılayıcı, tepe gücünü sinyalin kendi 1/f arka plan eğrisiyle karşılaştırır ve en az 3 tam döngü ister. Yanlış olumlu oranları simülasyonla ölçülmüştür: hiç solunum yokken (beyaz/pembe gürültü, rastgele sürüklenme) yanlış olumlu oranı 20 sn'lik sinyalde yaklaşık %2–4, 60 sn'lik sinyalde yaklaşık %0 çıkmıştır; gürültü genliğine eşit bir periyodik bileşen yaklaşık %95+ yakalanır. Gerçek kamera gürültüsü (otomatik kazanç, hareket, hava akımı) bunlardan farklıdır, bu oranlar gerçek başarım değildir. Olumlu bileşen nefes almanın ya da yaşamın kanıtı değildir; olumsuz sonuç da ölümün kanıtı değildir.
+5. Kameraya özgü radyometrik çözücü yoktur; yalnızca kullanıcının verdiği doğrusal formül desteklenir.
+6. Yalnızca 10 etiketli görüntüyle bir ilk ölçüm yapılmıştır (Precision 0,31, Recall 0,26); sıcaklık ölçüm hatası bilinmemektedir, solunum algılama LCAS'ta doğrulanamamıştır ("Dedektör değerlendirmesi" bölümüne bakın). Hayvanlar insanlardan ayrılamaz, yakın plan özneler parçalara bölünebilir, küçük öznelerden oluşan yoğun kalabalıklar eksik sayılır.
 7. PostgreSQL analiz üst verisini ve sonuç JSON'unu saklar. Yüklenen kaynak medya dosyalarının kendisi veritabanında ya da nesne depolamada arşivlenmez.
 
 ## Güvenlik

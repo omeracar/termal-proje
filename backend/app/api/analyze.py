@@ -5,7 +5,9 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -27,14 +29,32 @@ MAX_IMAGE_BYTES = 25 * 1024 * 1024
 MAX_VIDEO_BYTES = 200 * 1024 * 1024
 
 
-def _run_analysis(image: np.ndarray):
+def _temperature_map(image: np.ndarray, raw_offset: Optional[float], raw_scale: Optional[float]):
+    """16 bit tek kanallı görüntüden °C haritası üretir: °C = (ham − raw_offset) / raw_scale.
+
+    Formül kameraya özgüdür ve kullanıcı tarafından verilmelidir (örn. Optris/LCAS: 1000 ve 10).
+    İkisi de verilmezse None döner (DN ile çalışılır).
+    """
+    if raw_offset is None and raw_scale is None:
+        return None
+    if raw_offset is None or raw_scale is None:
+        raise ValueError("raw_offset ve raw_scale birlikte verilmelidir")
+    if raw_scale == 0:
+        raise ValueError("raw_scale sıfır olamaz")
+    if image.ndim != 2 or image.dtype != np.uint16:
+        raise ValueError("Radyometrik dönüşüm için tek kanallı 16 bit (uint16) TIFF/PNG gerekir")
+    return (image.astype(np.float64) - raw_offset) / raw_scale
+
+
+def _run_analysis(image: np.ndarray, temp_map: Optional[np.ndarray] = None):
     candidates, method = processor.detect_people(image)
     annotated = processor.draw_detections(image, candidates)
     measurements = []
     for item in candidates:
-        stats = temperature_service.analyze_region(image, item)
-        stats["background_comparison"] = temperature_service.compare_with_surroundings(image, item)
-        stats["distribution"] = temperature_service.region_distribution(image, item)
+        stats = temperature_service.analyze_region(image, item, temperature_map_c=temp_map)
+        stats["background_comparison"] = temperature_service.compare_with_surroundings(
+            image, item, temperature_map_c=temp_map)
+        stats["distribution"] = temperature_service.region_distribution(image, item, temperature_map_c=temp_map)
         measurements.append(stats)
     ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 92])
     ok_heat, heat_encoded = cv2.imencode(".jpg", build_heatmap(image, candidates),
@@ -53,7 +73,8 @@ def _save_record(db: Session, **values) -> AnalysisRecord:
 
 
 @router.post("/analyze")
-async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def analyze_image(file: UploadFile = File(...), raw_offset: Optional[float] = Form(None),
+                        raw_scale: Optional[float] = Form(None), db: Session = Depends(get_db)):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Görüntü analizi için JPG, PNG, TIFF veya BMP kullanın")
@@ -64,7 +85,9 @@ async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_
     if image is None:
         raise HTTPException(status_code=400, detail="Görüntü çözülemedi")
     try:
-        candidates, method, measurements, encoded, heat_encoded = await run_in_threadpool(_run_analysis, image)
+        temp_map = _temperature_map(image, raw_offset, raw_scale)
+        candidates, method, measurements, encoded, heat_encoded = await run_in_threadpool(
+            _run_analysis, image, temp_map)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -74,7 +97,12 @@ async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_
         "image_shape": list(image.shape), "method": method,
         "detection_semantics": "thermal_candidate_regions_not_confirmed_people",
         "candidates": candidates, "temperature_analysis": measurements,
-        "temperature_warning": "Piksel seviyeleri DN cinsindendir, °C değildir. Fiziksel sıcaklık için kalibre edilmiş radyometrik sıcaklık matrisi gerekir.",
+        "temperature_unit": "degC" if temp_map is not None else "DN",
+        "temperature_warning": (
+            f"°C değerleri kullanıcının verdiği formülle hesaplandı: (ham − {raw_offset:g}) / {raw_scale:g}. "
+            "Formülün kamera için doğru olduğundan kullanıcı sorumludur; sistem kalibrasyonu doğrulamaz."
+            if temp_map is not None else
+            "Piksel seviyeleri DN cinsindendir, °C değildir. Fiziksel sıcaklık için raw_offset ve raw_scale ile 16 bit radyometrik görüntü yükleyin."),
         "vital_signs": vital,
     }
     try:
@@ -85,7 +113,7 @@ async def analyze_image(file: UploadFile = File(...), db: Session = Depends(get_
                 "candidate_region_count": len(candidates),
                 "image_dimensions": " × ".join(str(v) for v in image.shape),
                 "processing_method": method,
-                "temperature_unit": "DN (raw pixel intensity)",
+                "temperature_unit": "degC (kullanıcı formülü)" if temp_map is not None else "DN (raw pixel intensity)",
                 "vital_signal_status": vital["status"],
             },
             result_data=result_data,

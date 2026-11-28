@@ -59,3 +59,18 @@ def test_rate_estimate_is_finer_than_welch_bin_width(rate_per_min):
     values = np.sin(2 * np.pi * rate_per_min / 60 * t + 0.7) + rng.normal(0, 0.3, t.size)
     result = service.analyze_temperature_series(values.tolist(), fps=FPS)
     assert abs(result["details"]["respiratory_band_rate_per_min"] - rate_per_min) < 0.5
+
+def test_frequency_interpolation_stays_inside_lower_respiratory_band_edge():
+    """A peak at 0.10 Hz must not be interpolated down to 0.075 Hz (4.5 breaths/min)."""
+    fps = 26.8
+    duration_s = 40
+    t = np.arange(int(duration_s * fps)) / fps
+    # A slow step-like disturbance makes the lowest in-band bin dominant.
+    values = 0.02 * np.sin(2 * np.pi * 0.10 * t) + 0.4 * np.tanh((t - 20.0) * 2.0)
+
+    result = VitalSignsService().analyze_temperature_series(values.tolist(), fps=fps)
+    estimate = result["details"]["respiratory_band_rate_per_min"]
+
+    # 0.10 Hz is the lower band edge: report 6 breaths/min, never 4.5.
+    assert estimate >= 6.0
+

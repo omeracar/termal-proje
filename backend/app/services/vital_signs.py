@@ -57,6 +57,14 @@ class VitalSignsService:
         peak_index = int(band_indices[np.argmax(power[band_indices])])
         peak_power = float(power[peak_index])
         peak_frequency = float(frequencies[peak_index])
+        # Welch bin genişliği (~0,05 Hz = 3 nefes/dk) hız tahmini için kaba kalır: log-güç üzerinde
+        # parabolik ara değerleme ile tepe konumu bin altı çözünürlüğe inceltilir (karar eşiğini etkilemez).
+        if 0 < peak_index < len(frequencies) - 1 and min(power[peak_index - 1:peak_index + 2]) > 0:
+            lo, mid, hi = np.log(power[peak_index - 1:peak_index + 2])
+            denom = lo - 2 * mid + hi
+            if denom < 0:
+                shift = float(np.clip(0.5 * (lo - hi) / denom, -0.5, 0.5))
+                peak_frequency += shift * float(frequencies[1] - frequencies[0])
 
         # Tepe, sinyalin kendi (1/f biçimli) arka plan eğrisiyle kıyaslanır. Eğri, tepe çevresi
         # hariç log-log doğrusal uyumla bulunur; böylece kamera kayması ve rastgele sürüklenme

@@ -49,3 +49,13 @@ def test_slow_drift_with_no_oscillation_is_not_breathing():
     t = np.arange(300) / FPS
     drift = 0.5 * t + 0.02 * t ** 2
     assert not _detected(drift + np.random.default_rng(0).normal(0, 0.05, t.size))
+
+
+@pytest.mark.parametrize("rate_per_min", [12.0, 18.75, 26.0])
+def test_rate_estimate_is_finer_than_welch_bin_width(rate_per_min):
+    """Bin genişliği ~3 nefes/dk; parabolik ara değerleme ile hata bunun çok altında kalmalı."""
+    rng = np.random.default_rng(21)
+    t = np.arange(0, 40, 1 / FPS)
+    values = np.sin(2 * np.pi * rate_per_min / 60 * t + 0.7) + rng.normal(0, 0.3, t.size)
+    result = service.analyze_temperature_series(values.tolist(), fps=FPS)
+    assert abs(result["details"]["respiratory_band_rate_per_min"] - rate_per_min) < 0.5

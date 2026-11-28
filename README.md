@@ -102,6 +102,27 @@ Ayrıntılı görüntü bazlı sonuçlar `data/eval_metrics.json` dosyasındadı
 
 Önceki gayriresmî kontrol (etiketsiz), 11 gerçek termal görüntü (kişiler gözle sayıldı, etiketli doğru veri DEĞİL; dolayısıyla Precision/Recall değeri değildir): dedektör 3 görüntüde sayıyı tam bildi, 3 görüntüde bir kişi farkla bildi, kalan 5 görüntüde üç veya daha fazla fark verdi (hayvanlar, yakın plan özneler, uzak ya da yoğun kalabalıklar, 7 kişi için 12 aday çıkan kalabalık bir sokak sahnesi). Ortalama süre işlemcide görüntü başına yaklaşık 0,12 saniyedir.
 
+## Solunum algılayıcısının doğrulanması (LCAS veri seti)
+
+Yaşam belirtisi (solunum) analizi şu ana kadar yalnızca simülasyonla sınanmıştır. Gerçek veriyle sınamak için [LCAS Thermal Physiological Monitoring Dataset](https://lcas.lincoln.ac.uk/wp/research/data-sets-software/lcas-thermal-physiological-monitoring-dataset/) kullanılır (Optris PI-450 termal kamera, radyometrik veri: °C = (ham − 1000) / 10, referans solunum olay kaydı; lisans CC BY-NC-SA 3.0, yalnızca ticari olmayan kullanım — veri setinin kendisi depoya eklenmez, `data/validation/` git'e girmez).
+
+**Durum: hat hazır, gerçek kayıtla henüz çalıştırılmadı; bu bölümde başarım değeri yoktur.**
+
+1. Veri setinden bir kişinin `.bag` dosyasını ve aynı kişinin `*_respiration.csv` dosyasını indirin (ikisinin zaman damgası aynı olmalı, örn. `2016-11-22-14-23-08-Claudio`).
+2. Rosbag'i inceleyin (gerçek kare hızı, konu adı, kodlama; hiçbir şey yazmaz):
+```bash
+pip install rosbags numpy
+python tools/lcas_rosbag_to_npz.py KAYIT.bag --info
+```
+3. Dönüştürün ve doğrulayın:
+```bash
+python tools/lcas_rosbag_to_npz.py KAYIT.bag --out data/validation/kayit.npz
+cd backend
+python scripts/validate_breathing.py --npz ../data/validation/kayit.npz --reference ../data/validation/KISI_respiration.csv --roi auto --roi-preview ../data/validation/roi.png --out ../data/validation/breathing_result.json --plot ../data/validation/breathing.png
+```
+
+Betik, ROI (`auto` = en sıcak bölge; ya da `--roi x,y,w,h`) ortalama sıcaklık serisini çıkarır ve 40 sn'lik pencerelerde algılayıcının nefes/dakika tahminini referanstaki nefes olaylarının ortanca aralığıyla karşılaştırır. Raporlanan ölçütler: referansı olan pencerelerde algılama oranı, ortalama/ortanca mutlak hata (nefes/dk) ve ±3 nefes/dk içinde kalan pencere oranı. `--roi-preview` ile ROI kutusunu gözle kontrol edin; otomatik ROI sezgiseldir. İki bilgisayarın saati farklıysa `--offset` kullanın.
+
 ## Veri seti belgelendirmesi
 
 Şartname, veri setlerinin kaynaklarının, erişim bağlantılarının ve teknik özelliklerinin belgelenmesini zorunlu tutar. **Bu belge henüz tamamlanmamıştır.**

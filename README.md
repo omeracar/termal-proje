@@ -141,22 +141,25 @@ Betik, ROI (`auto` = en sıcak bölge; ya da `--roi x,y,w,h`) ortalama sıcaklı
 
 ## Veri seti belgelendirmesi
 
-Şartname, veri setlerinin kaynaklarının, erişim bağlantılarının ve teknik özelliklerinin belgelenmesini zorunlu tutar. **Bu belge henüz tamamlanmamıştır.**
+Kullanılan gerçek termal kamera veri setleri (aşağıdaki bağlantılar ve lisans/radyometri bilgileri veri setlerinin yayın sayfalarından ayrıca doğrulanmalıdır):
 
-`data/samples` içindeki 10 görüntü gerçek termal kamera görüntüleridir, ancak kaynakları, lisansları ve çekim bilgileri henüz kayıt altına alınmamıştır. Aşağıdaki tablo doldurulmalıdır:
-
-| Dosya | Veri seti / kaynak | Erişim bağlantısı | Lisans | Radyometrik mi? | Video var mı? |
+| Veri seti | Kullanım amacı | Erişim | Radyometrik °C? | Video / doğrulama etiketi | Lisans notu |
 |---|---|---|---|---|---|
-| 1.jpg … 10.jpeg | _belirtilecek_ | _belirtilecek_ | _belirtilecek_ | _belirtilecek_ | _belirtilecek_ |
+| FLIR ADAS Thermal Dataset | İnsan tespiti örnek görüntüleri | https://www.flir.com/oem/adas/adas-dataset-form/ | 16 bit görüntüler var; kameraya özgü kalibrasyonla °C'ye çevrilmeden doğrudan °C kabul edilmemelidir | Kare tabanlı, nesne etiketli; solunum etiketi yok | FLIR'in veri seti koşulları (genellikle araştırma amaçlı) |
+| KAIST Multispectral Pedestrian Dataset | İnsan tespiti örnek görüntüleri | https://soonminhwang.github.io/rgbt-ped-detection/ | Hayır (8 bit görüntü) | Yaya kutu etiketi; solunum etiketi yok | Araştırma amaçlı; yayın sayfasındaki koşullara bakın |
+| LLVIP | Düşük ışıkta insan tespiti örnek görüntüleri | https://bupt-ai-cz.github.io/LLVIP/ | Hayır (8 bit kızılötesi) | Kutu etiketli; solunum etiketi yok | Yalnızca araştırma amaçlı; yayın sayfasındaki koşullara bakın |
+| LCAS Thermal Physiological Monitoring Dataset | Solunum doğrulaması | https://lcas.lincoln.ac.uk/wp/research/data-sets-software/lcas-thermal-physiological-monitoring-dataset/ | Evet (Optris PI-450, °C = (ham − 1000) / 10) | Evet, solunum olay referansı (5 kişi) | CC BY-NC-SA 3.0, ticari olmayan |
 
-Şartnamede önerilen kaynaklar (FLIR Thermal Dataset, KAIST Multispectral Pedestrian Dataset, LLVIP, Zenodo, IEEE DataPort, akademik veri setleri) kullanılmadan önce şu açılardan incelenmelidir: radyometrik sıcaklık içeriyor mu, termal video içeriyor mu, solunum doğrulaması için etiket var mı. Bunlar bu depoda henüz doğrulanmamıştır.
+`data/samples` içindeki 10 görüntü yukarıdaki FLIR, KAIST ve LLVIP veri setlerinden alınmıştır. **Hangi dosyanın hangi veri setinden geldiği dosya bazında kaydedilmemiştir;** bilinen dosyalar için bu bilgi eklenmelidir. 8 bit JPEG örneklerden °C hesaplanamaz; bu görüntülerde sıcaklık değerleri DN (görece) cinsindendir. Radyometrik çalışma yalnızca LCAS verisiyle yapılmıştır.
+
+Şartnamede önerilen Zenodo, IEEE DataPort ve akademik veri setleri bu çalışmada incelenmemiştir.
 
 ## Şartnameye göre eksikler (güncel)
 
-- **Gerçek sıcaklık (°C):** `/api/v1/analyze` artık 16 bit tek kanallı TIFF/PNG için `raw_offset` ve `raw_scale` form alanlarıyla °C = (ham − offset) / scale hesaplar (ortalama, min/max, çevre farkı, histogram °C olur). Formül kameraya özgüdür ve kullanıcı tarafından verilir; sistem kalibrasyonu doğrulamaz, sıcaklık ölçüm hatası referans veriyle ölçülmemiştir. Arayüzde bu iki alan henüz yoktur (yalnızca API).
+- **Gerçek sıcaklık (°C):** `/api/v1/analyze` artık 16 bit tek kanallı TIFF/PNG için `raw_offset` ve `raw_scale` form alanlarıyla °C = (ham − offset) / scale hesaplar (ortalama, min/max, çevre farkı, histogram °C olur). Formül kameraya özgüdür ve kullanıcı tarafından verilir; sistem kalibrasyonu doğrulamaz, sıcaklık ölçüm hatası referans veriyle ölçülmemiştir. Arayüzde görüntü seçilince "Radyometrik sıcaklık" ofset/ölçek alanları görünür.
 - **Yaşam belirtisi:** LCAS ile gerçek doğrulama yapıldı ve olumsuz çıktı (yukarıdaki bölüm). Bulgu yalnızca keşif amaçlıdır.
 - **Başarım:** Precision 0,31 / Recall 0,26 ölçülmüştür; dedektör iyileştirmesi yapılmamıştır. Farklı çevre koşullarında karşılaştırmalı inceleme yapılmamıştır.
-- **Veri seti belgelendirmesi:** Yukarıdaki tablo boştur.
+- **Veri seti belgelendirmesi:** Veri setleri tabloda belgelendi; 10 örnek görüntünün dosya bazında kaynağı kayıtlı değildir.
 
 ## Önemli teknik sınırlamalar
 

@@ -231,3 +231,8 @@ input[type="file"] {
 .preview-grid figure { margin: 0; flex: 1 1 200px; max-width: 320px; }
 .preview-grid img { width: 100%; height: auto; display: block; }
 .preview-grid figcaption { font-size: 0.8rem; opacity: 0.8; }
+
+.radiometric { margin: 12px 0; padding: 10px 14px; border: 1px solid #ccd; border-radius: 8px; text-align: left; }
+.radiometric label { margin-right: 14px; font-size: 0.9rem; }
+.radiometric input { width: 90px; margin-left: 6px; }
+.radiometric small { display: block; margin-top: 6px; color: #667; }

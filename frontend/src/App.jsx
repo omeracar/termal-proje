@@ -36,6 +36,8 @@ function App() {
   const [history, setHistory] = useState([])
   const [historyError, setHistoryError] = useState(null)
   const [selectedRecord, setSelectedRecord] = useState(null)
+  const [rawOffset, setRawOffset] = useState('')
+  const [rawScale, setRawScale] = useState('')
   const isVideo = Boolean(file && /\.(mp4|avi|mov|mkv)$/i.test(file.name))
 
   const loadHistory = async () => {
@@ -70,11 +72,24 @@ function App() {
       setError('Lütfen bir termal görüntü veya video seçin')
       return
     }
+    const hasOffset = rawOffset.trim() !== ''
+    const hasScale = rawScale.trim() !== ''
+    if (!isVideo && (hasOffset || hasScale)) {
+      if (!(hasOffset && hasScale) || !Number.isFinite(Number(rawOffset)) || !Number.isFinite(Number(rawScale))
+        || Number(rawScale) === 0) {
+        setError('°C için ofset ve ölçek birlikte, sayı olarak girilmeli (ölçek sıfır olamaz)')
+        return
+      }
+    }
     setLoading(true)
     setError(null)
     setResult(null)
     const formData = new FormData()
     formData.append('file', file)
+    if (!isVideo && hasOffset && hasScale) {
+      formData.append('raw_offset', rawOffset.trim())
+      formData.append('raw_scale', rawScale.trim())
+    }
     try {
       const endpoint = isVideo ? 'analyze-video' : 'analyze'
       const response = await axios.post(`${API}/${endpoint}`, formData, {
@@ -108,6 +123,17 @@ function App() {
       <p className="subtitle">Kayıp Personel Aday Bölgesi Tespiti ve Termal Analiz</p>
       <div className="upload-box">
         <input type="file" accept=".jpg,.jpeg,.png,.tif,.tiff,.bmp,.mp4,.avi,.mov,.mkv,image/*,video/*" onChange={handleFileChange} />
+        {file && !isVideo && (
+          <fieldset className="radiometric">
+            <legend>Radyometrik sıcaklık (isteğe bağlı)</legend>
+            <label>Ofset <input type="number" step="any" value={rawOffset} placeholder="örn. 1000"
+              onChange={(e) => setRawOffset(e.target.value)} /></label>
+            <label>Ölçek <input type="number" step="any" value={rawScale} placeholder="örn. 10"
+              onChange={(e) => setRawScale(e.target.value)} /></label>
+            <small>°C = (ham − ofset) / ölçek. Yalnızca tek kanallı 16 bit TIFF/PNG için; formül kameraya özgüdür ve
+              doğruluğundan siz sorumlusunuz (LCAS/Optris: 1000 ve 10). Boş bırakılırsa değerler DN (görece) kalır.</small>
+          </fieldset>
+        )}
         {preview && <div className="preview"><img src={preview} alt="Yüklenen termal görüntü önizlemesi" /></div>}
         <button onClick={handleAnalyze} disabled={!file || loading} className="upload-btn">
           {loading ? 'Analiz ediliyor...' : isVideo ? 'Videoyu Analiz Et' : 'Görüntüyü Analiz Et'}

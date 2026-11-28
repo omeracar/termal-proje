@@ -59,7 +59,15 @@ class VitalSignsService:
         peak_frequency = float(frequencies[peak_index])
         # Welch bin genişliği (~0,05 Hz = 3 nefes/dk) hız tahmini için kaba kalır: log-güç üzerinde
         # parabolik ara değerleme ile tepe konumu bin altı çözünürlüğe inceltilir (karar eşiğini etkilemez).
-        if 0 < peak_index < len(frequencies) - 1 and min(power[peak_index - 1:peak_index + 2]) > 0:
+        # Ancak ara değerleme komşu binleri de solunum bandının içinde olmalı; aksi halde alt/üst
+        # bant sınırındaki tepe, bandın dışına taşabilir (örn. 0,10 Hz -> 0,075 Hz).
+        can_interpolate = (
+            0 < peak_index < len(frequencies) - 1
+            and band[peak_index - 1]
+            and band[peak_index + 1]
+            and min(power[peak_index - 1:peak_index + 2]) > 0
+        )
+        if can_interpolate:
             lo, mid, hi = np.log(power[peak_index - 1:peak_index + 2])
             denom = lo - 2 * mid + hi
             if denom < 0:
